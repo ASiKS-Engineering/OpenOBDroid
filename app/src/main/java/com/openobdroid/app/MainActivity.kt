@@ -21,7 +21,7 @@ class MainActivity : ComponentActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    finish()
+                    obdViewModel?.disconnect()
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
                     context?.let { obdViewModel?.connectAdapter(it) }

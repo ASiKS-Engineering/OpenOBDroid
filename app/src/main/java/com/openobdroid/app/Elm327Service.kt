@@ -40,6 +40,12 @@ class Elm327Service(
     fun readCoolant() =
         send("0105")
 
+    fun readLoad() =
+        send("0104")
+
+    fun readFuelSystemStatus() =
+        send("0103")
+
     fun readLambda() =
         send("0124")
 

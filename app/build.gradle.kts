@@ -33,9 +33,9 @@ android {
         // Target API level used for testing and optimizing the app
         targetSdk = 35
         // Internal version number used to determine which version is more recent
-        versionCode = 1
+        versionCode = 2
         // Publicly visible version string
-        versionName = "1.0"
+        versionName = "1.1.0"
     }
 
     compileOptions {
@@ -50,6 +50,8 @@ android {
     buildFeatures {
         // Enables support for Jetpack Compose
         compose = true
+        // Enables generation of BuildConfig class
+        buildConfig = true
     }
 
     packaging {

@@ -1,6 +1,7 @@
 package com.openobdroid.app
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -16,6 +17,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -32,11 +35,25 @@ fun ObdScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("OpenOBDroid", fontWeight = FontWeight.Bold) },
+                title = {
+                    Column {
+                        Text("OpenOBDroid", fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "v${BuildConfig.VERSION_NAME}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                ),
+                actions = {
+                    IconButton(onClick = { vm.exitApp() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close App")
+                    }
+                }
             )
         }
     ) { padding ->
@@ -55,6 +72,18 @@ fun ObdScreen(
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
+                    text = { Text("Live Graph") },
+                    icon = { Icon(Icons.Default.Timeline, contentDescription = null) }
+                )
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    text = { Text("Cat Test") },
+                    icon = { Icon(Icons.Default.Science, contentDescription = null) }
+                )
+                Tab(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
                     text = { Text("Activity Log") },
                     icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) }
                 )
@@ -63,10 +92,128 @@ fun ObdScreen(
             Crossfade(targetState = selectedTab, label = "TabTransition") { tabIndex ->
                 when (tabIndex) {
                     0 -> DashboardTab(vm, context)
-                    1 -> LogTab(vm)
+                    1 -> GraphTab(vm)
+                    2 -> CatTestTab(vm)
+                    3 -> LogTab(vm)
                 }
             }
         }
+    }
+}
+
+@Composable
+fun CatTestTab(vm: ObdViewModel) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Catalysator Performance Test", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "This test checks the correlation between pre-cat and post-cat O2 sensors.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Prerequisites:", style = MaterialTheme.typography.titleSmall)
+                BulletPoint("Coolant Temp >= 80°C")
+                BulletPoint("RPM: 2000 - 3000")
+                BulletPoint("Fuel System: Closed Loop")
+                BulletPoint("Condition: Constant Load")
+            }
+        }
+
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Test Status", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    text = vm.catTestStatus,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+                
+                LinearProgressIndicator(
+                    progress = { vm.catTestProgress },
+                    modifier = Modifier.fillMaxWidth().clip(CircleShape).height(8.dp)
+                )
+                
+                Spacer(Modifier.height(16.dp))
+
+                Button(
+                    onClick = {
+                        if (vm.isCatTestRunning) vm.stopCatTest() else vm.startCatTest()
+                    },
+                    enabled = vm.isCarConnected,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = if (vm.isCatTestRunning) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                             else ButtonDefaults.buttonColors()
+                ) {
+                    Icon(if (vm.isCatTestRunning) Icons.Default.Stop else Icons.Default.PlayArrow, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (vm.isCatTestRunning) "Stop Test" else "Start Catalyst Test")
+                }
+            }
+        }
+
+        if (vm.catTestResult != null) {
+            val isSuccess = vm.catTestResult?.contains("SUCCESS") == true
+            val isWorn = vm.catTestResult?.contains("FAILED") == true
+            
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = when {
+                        isSuccess -> Color(0xFFE8F5E9)
+                        isWorn -> Color(0xFFFFEBEE)
+                        else -> Color(0xFFFFF3E0)
+                    }
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "Test Result",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = when {
+                            isSuccess -> Color(0xFF2E7D32)
+                            isWorn -> Color(0xFFC62828)
+                            else -> Color(0xFFEF6C00)
+                        }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = vm.catTestResult ?: "",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BulletPoint(text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
+        Spacer(Modifier.width(8.dp))
+        Text(text, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -183,6 +330,122 @@ fun DashboardTab(vm: ObdViewModel, context: android.content.Context) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50))
                     Spacer(Modifier.width(12.dp))
                     Text("No active DTCs found.", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun GraphTab(vm: ObdViewModel) {
+    val graphablePids = listOf(
+        "Read RPM",
+        "Read Speed",
+        "Read Coolant Temp",
+        "Read Lambda",
+        "Read O2 Voltage B1S1",
+        "Read O2 Voltage B1S2"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Live Data Plot", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+                
+                var expanded by remember { mutableStateOf(false) }
+                
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !vm.isGraphing
+                    ) {
+                        Text(vm.selectedPidForGraph)
+                        Icon(Icons.Default.ArrowDropDown, null)
+                    }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        graphablePids.forEach { pid ->
+                            DropdownMenuItem(
+                                text = { Text(pid) },
+                                onClick = {
+                                    vm.selectedPidForGraph = pid
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(Modifier.height(16.dp))
+                
+                Button(
+                    onClick = {
+                        if (vm.isGraphing) vm.stopGraphing() else vm.startGraphing()
+                    },
+                    enabled = vm.isCarConnected,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = if (vm.isGraphing) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                             else ButtonDefaults.buttonColors()
+                ) {
+                    Icon(if (vm.isGraphing) Icons.Default.Stop else Icons.Default.PlayArrow, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (vm.isGraphing) "Stop Live Reading" else "Start Live Reading")
+                }
+            }
+        }
+
+        ElevatedCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                if (vm.graphData.isEmpty()) {
+                    Text(
+                        "No data yet. Start reading to see the graph.",
+                        modifier = Modifier.align(Alignment.Center),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                } else {
+                    val data = vm.graphData.toList()
+                    val maxVal = (data.maxOrNull() ?: 1f).coerceAtLeast(1f)
+                    val minVal = (data.minOrNull() ?: 0f)
+                    
+                    Column {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("${maxVal.toInt()}", style = MaterialTheme.typography.labelSmall)
+                            Text(vm.selectedPidForGraph, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            Text("${data.last().toInt()}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
+                        }
+                        
+                        Canvas(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
+                            val width = size.width
+                            val height = size.height
+                            val spacing = width / 50f
+                            
+                            val path = Path()
+                            data.forEachIndexed { index, value ->
+                                val x = index * spacing
+                                val y = height - ((value - minVal) / (maxVal - minVal + 1) * height)
+                                
+                                if (index == 0) path.moveTo(x, y)
+                                else path.lineTo(x, y)
+                            }
+                            
+                            drawPath(
+                                path = path,
+                                color = Color(0xFF2196F3),
+                                style = Stroke(width = 3.dp.toPx())
+                            )
+                        }
+                    }
                 }
             }
         }
