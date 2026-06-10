@@ -62,5 +62,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         unregisterReceiver(usbReceiver)
+        // Close USB OBD connection
+        obdViewModel?.cleanup()
     }
 }
