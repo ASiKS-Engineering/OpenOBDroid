@@ -5,11 +5,20 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 class ObdViewModel : ViewModel() {
 
     var adapterStatus by mutableStateOf("Disconnected")
     var carStatus by mutableStateOf("Disconnected")
+
+    private val _events = MutableSharedFlow<ObdEvent>()
+    val events = _events.asSharedFlow()
+
+    sealed class ObdEvent {
+        object CloseApp : ObdEvent()
+    }
 
     // UI state properties
     val isBusy by derivedStateOf { adapterStatus == "Connecting..." || carStatus == "Checking..." }
@@ -18,6 +27,17 @@ class ObdViewModel : ViewModel() {
 
     var dtcs by mutableStateOf(emptyList<String>())
     val messages = mutableStateListOf<String>()
+
+    val availableCommands = listOf(
+        "Read RPM",
+        "Read Speed",
+        "Read Coolant Temp",
+        "Read VIN",
+        "Read Pending DTCs",
+        "Read Lambda",
+        "Read O2 Voltage B1S1",
+        "Read O2 Voltage B1S2"
+    )
 
     private var usb: UsbObdManager? = null
     private var elm: Elm327Service? = null
@@ -28,39 +48,43 @@ class ObdViewModel : ViewModel() {
         }
     }
 
-    fun connect(context: Context) {
+    fun connectAdapter(context: Context) {
+        if (isAdapterConnected) return
+        
         viewModelScope.launch(Dispatchers.IO) {
-            // Step 1: Connect to Adapter if needed
-            if (usb == null || !isAdapterConnected) {
-                withContext(Dispatchers.Main) {
-                    adapterStatus = "Connecting..."
+            withContext(Dispatchers.Main) {
+                adapterStatus = "Connecting..."
+                if (messages.isEmpty() || messages.last().contains("failed", ignoreCase = true) || messages.last().contains("Error")) {
                     messages.clear()
-                    addMessage("Initializing Adapter connection...")
                 }
-
-                val usbManager = UsbObdManager(context)
-                if (usbManager.connect()) {
-                    val service = Elm327Service(usbManager)
-                    if (service.initialize()) {
-                        usb = usbManager
-                        elm = service
-                        withContext(Dispatchers.Main) { adapterStatus = "Connected" }
-                        addMessage("Adapter: ELM327 connected.")
-                    } else {
-                        addMessage("Error: ELM327 initialization failed.")
-                        usbManager.close()
-                        withContext(Dispatchers.Main) { adapterStatus = "Disconnected" }
-                        return@launch
-                    }
-                } else {
-                    addMessage("Error: No USB OBD adapter detected.")
-                    withContext(Dispatchers.Main) { adapterStatus = "Disconnected" }
-                    return@launch
-                }
+                addMessage("Connecting to Adapter...")
             }
 
-            // Step 2: Connect to Car (ECU)
-            val service = elm ?: return@launch
+            val usbManager = UsbObdManager(context)
+            if (usbManager.connect()) {
+                val service = Elm327Service(usbManager)
+                if (service.initialize()) {
+                    usb = usbManager
+                    elm = service
+                    withContext(Dispatchers.Main) { adapterStatus = "Connected" }
+                    addMessage("Adapter: ELM327 connected.")
+                } else {
+                    addMessage("Error: ELM327 initialization failed.")
+                    usbManager.close()
+                    withContext(Dispatchers.Main) { adapterStatus = "Disconnected" }
+                }
+            } else {
+                addMessage("Error: No USB OBD adapter detected.")
+                withContext(Dispatchers.Main) { adapterStatus = "Disconnected" }
+            }
+        }
+    }
+
+    fun connectCar() {
+        val service = elm ?: return
+        if (isCarConnected) return
+
+        viewModelScope.launch(Dispatchers.IO) {
             withContext(Dispatchers.Main) {
                 carStatus = "Checking..."
                 addMessage("Verifying connection to Car ECU...")
@@ -77,7 +101,7 @@ class ObdViewModel : ViewModel() {
                     carFound = true
                     break
                 }
-                if (i < 3) delay(1000)
+                if (i < 3) delay(500)
             }
 
             withContext(Dispatchers.Main) {
@@ -99,6 +123,10 @@ class ObdViewModel : ViewModel() {
         adapterStatus = "Disconnected"
         carStatus = "Disconnected"
         addMessage("Disconnected.")
+        
+        viewModelScope.launch {
+            _events.emit(ObdEvent.CloseApp)
+        }
     }
 
     fun readDtc() {
@@ -132,6 +160,25 @@ class ObdViewModel : ViewModel() {
             withContext(Dispatchers.Main) {
                 dtcs = emptyList()
             }
+        }
+    }
+
+    fun runCommand(commandName: String) {
+        val service = elm ?: return
+        addMessage("Running: $commandName")
+        viewModelScope.launch(Dispatchers.IO) {
+            val response = when (commandName) {
+                "Read RPM" -> service.readRpm()
+                "Read Speed" -> service.readSpeed()
+                "Read Coolant Temp" -> service.readCoolant()
+                "Read VIN" -> service.readVin()
+                "Read Pending DTCs" -> service.readPendingDtc()
+                "Read Lambda" -> service.readLambda()
+                "Read O2 Voltage B1S1" -> service.readO2VoltageB1S1()
+                "Read O2 Voltage B1S2" -> service.readO2VoltageB1S2()
+                else -> "Unknown command"
+            }
+            addMessage("Response: $response")
         }
     }
 }

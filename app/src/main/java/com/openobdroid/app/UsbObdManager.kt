@@ -61,7 +61,7 @@ class UsbObdManager(
             System.currentTimeMillis()
 
         while (
-            (System.currentTimeMillis() - start) < 3000
+            (System.currentTimeMillis() - start) < 2000
         ) {
 
             val count =
@@ -71,14 +71,15 @@ class UsbObdManager(
             if (count > 0) {
 
                 result.append(
-                    String(buffer,0,count)
+                    String(buffer, 0, count)
                 )
 
                 if (result.contains(">"))
                     break
+            } else {
+                // Short sleep to prevent CPU spiking while waiting
+                Thread.sleep(10)
             }
-
-            Thread.sleep(20)
         }
 
         return result.toString()

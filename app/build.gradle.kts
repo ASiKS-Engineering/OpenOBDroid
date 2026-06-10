@@ -62,6 +62,13 @@ android {
             useLegacyPackaging = true
         }
     }
+
+    applicationVariants.all {
+        outputs.all {
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            output.outputFileName = "OpenOBDroid.apk"
+        }
+    }
 }
 
 dependencies {
@@ -73,6 +80,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     // Material Design 3 components for Compose
     implementation("androidx.compose.material3:material3:1.3.1")
+    // Extended icons for Compose
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
     // Material components for Android (required for XML-based themes)
     implementation("com.google.android.material:material:1.12.0")
 

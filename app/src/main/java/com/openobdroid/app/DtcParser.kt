@@ -1,8 +1,66 @@
 package com.openobdroid.app
 
-import java.util.Locale
-
 object DtcParser {
+
+    private val commonCodes = mapOf(
+        // Powertrain (P)
+        "P0100" to "Mass or Volume Air Flow Circuit Malfunction",
+        "P0101" to "Mass or Volume Air Flow Circuit Range/Performance Problem",
+        "P0102" to "Mass or Volume Air Flow Circuit Low Input",
+        "P0103" to "Mass or Volume Air Flow Circuit High Input",
+        "P0110" to "Intake Air Temperature Circuit Malfunction",
+        "P0115" to "Engine Coolant Temperature Circuit Malfunction",
+        "P0116" to "Engine Coolant Temperature Circuit Range/Performance Problem",
+        "P0120" to "Throttle/Pedal Position Sensor/Switch A Circuit Malfunction",
+        "P0121" to "Throttle/Pedal Position Sensor/Switch A Circuit Range/Performance",
+        "P0130" to "O2 Sensor Circuit Malfunction (Bank 1 Sensor 1)",
+        "P0131" to "O2 Sensor Circuit Low Voltage (Bank 1 Sensor 1)",
+        "P0132" to "O2 Sensor Circuit High Voltage (Bank 1 Sensor 1)",
+        "P0133" to "O2 Sensor Circuit Slow Response (Bank 1 Sensor 1)",
+        "P0134" to "O2 Sensor Circuit No Activity Detected (Bank 1 Sensor 1)",
+        "P0135" to "O2 Sensor Heater Circuit Malfunction (Bank 1 Sensor 1)",
+        "P0141" to "O2 Sensor Heater Circuit Malfunction (Bank 1 Sensor 2)",
+        "P0171" to "System Too Lean (Bank 1)",
+        "P0172" to "System Too Rich (Bank 1)",
+        "P0174" to "System Too Lean (Bank 2)",
+        "P0175" to "System Too Rich (Bank 2)",
+        "P0201" to "Injector Circuit Malfunction - Cylinder 1",
+        "P0202" to "Injector Circuit Malfunction - Cylinder 2",
+        "P0203" to "Injector Circuit Malfunction - Cylinder 3",
+        "P0204" to "Injector Circuit Malfunction - Cylinder 4",
+        "P0300" to "Random/Multiple Cylinder Misfire Detected",
+        "P0301" to "Cylinder 1 Misfire Detected",
+        "P0302" to "Cylinder 2 Misfire Detected",
+        "P0303" to "Cylinder 3 Misfire Detected",
+        "P0304" to "Cylinder 4 Misfire Detected",
+        "P0325" to "Knock Sensor 1 Circuit Malfunction (Bank 1 or Single Sensor)",
+        "P0335" to "Crankshaft Position Sensor A Circuit Malfunction",
+        "P0340" to "Camshaft Position Sensor A Circuit Malfunction",
+        "P0401" to "Exhaust Gas Recirculation Flow Insufficient Detected",
+        "P0402" to "Exhaust Gas Recirculation Flow Excessive Detected",
+        "P0420" to "Catalyst System Efficiency Below Threshold (Bank 1)",
+        "P0430" to "Catalyst System Efficiency Below Threshold (Bank 2)",
+        "P0440" to "Evaporative Emission Control System Malfunction",
+        "P0442" to "Evaporative Emission Control System Leak Detected (Small Leak)",
+        "P0500" to "Vehicle Speed Sensor Malfunction",
+        "P0505" to "Idle Control System Malfunction",
+        "P0601" to "Internal Control Module Memory Check Sum Error",
+        "P0700" to "Transmission Control System Malfunction",
+        "P0705" to "Transmission Range Sensor Circuit Malfunction (PRNDL Input)",
+        
+        // Chassis (C)
+        "C0035" to "Left Front Wheel Speed Sensor Malfunction",
+        "C0040" to "Right Front Wheel Speed Sensor Malfunction",
+        "C0221" to "Right Front Wheel Speed Sensor Circuit Open",
+        
+        // Body (B)
+        "B0001" to "Driver Frontal Air Bag Deployment Control 1 - Circuit Malfunction",
+        "B1200" to "Climate Control Pushbutton Circuit Malfunction",
+        
+        // Network (U)
+        "U0001" to "High Speed CAN Communication Bus",
+        "U0100" to "Lost Communication With ECM/PCM A"
+    )
 
     fun parse(
         response: String,
@@ -13,8 +71,11 @@ object DtcParser {
                 .replace(" ","")
                 .replace("\r","")
                 .replace("\n","")
+                .uppercase()
 
-        if (!clean.startsWith("43"))
+        // Standard OBD-II Mode 03 response starts with 43
+        // Mode 07 (Pending) starts with 47
+        if (!clean.startsWith("43") && !clean.startsWith("47"))
             return emptyList()
 
         val result =
@@ -26,18 +87,19 @@ object DtcParser {
             (index + 3) < clean.length
         ) {
 
-            val code =
+            val codeHex =
                 clean.substring(
                     index,
                     index + 4
                 )
 
-            if (code == "0000")
+            if (codeHex == "0000")
                 break
 
-            result.add(
-                decode(code)
-            )
+            val decodedCode = decode(codeHex)
+            val description = commonCodes[decodedCode] ?: "Generic/Manufacturer Specific Code"
+            
+            result.add("$decodedCode: $description")
 
             index += 4
         }
@@ -49,34 +111,19 @@ object DtcParser {
         hex:String
     ): String {
 
-        val first =
-            hex.substring(0,2)
-                .toInt(16)
+        val firstHex = hex.substring(0, 1)
+        val secondHex = hex.substring(1, 2)
+        val remaining = hex.substring(2, 4)
 
-        val second =
-            hex.substring(2,4)
+        val firstChar = when (firstHex) {
+            "0", "1", "2", "3" -> "P"
+            "4", "5", "6", "7" -> "C"
+            "8", "9", "A", "B" -> "B"
+            else -> "U"
+        }
 
-        val prefix =
-            when((first and 0xC0) shr 6) {
-                0 -> "P"
-                1 -> "C"
-                2 -> "B"
-                else -> "U"
-            }
+        val firstDigit = firstHex.toInt(16) and 0x3
 
-        val d1 =
-            ((first and 0x30) shr 4)
-
-        val d2 =
-            (first and 0x0F)
-
-        return String.format(
-            Locale.US,
-            "%s%d%01X%s",
-            prefix,
-            d1,
-            d2,
-            second
-        )
+        return "$firstChar$firstDigit$secondHex$remaining"
     }
 }
