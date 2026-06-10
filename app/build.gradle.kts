@@ -87,6 +87,10 @@ dependencies {
     // Material components for Android (required for XML-based themes)
     implementation("com.google.android.material:material:1.12.0")
 
+    // Kotlin Coroutines for async operations
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
+
     /**
      * Local library dependency for FTDI D2XX driver.
      * Ensure the d2xx.jar file is present in the 'libs' directory.
