@@ -13,6 +13,7 @@ class ObdViewModel : ViewModel() {
 
     var adapterStatus by mutableStateOf("Disconnected")
     var carStatus by mutableStateOf("Disconnected")
+    var isCommandExecuting by mutableStateOf(false)
 
     private val _events = MutableSharedFlow<ObdEvent>()
     val events = _events.asSharedFlow()
@@ -30,6 +31,8 @@ class ObdViewModel : ViewModel() {
     val messages = mutableStateListOf<String>()
 
     val availableCommands = listOf(
+        "Read DTCs",
+        "Clear DTCs",
         "Read RPM",
         "Read Speed",
         "Read Coolant Temp",
@@ -52,8 +55,35 @@ class ObdViewModel : ViewModel() {
     var catTestStatus by mutableStateOf("Not started")
     var catTestResult by mutableStateOf<String?>(null)
     var catTestProgress by mutableStateOf(0f)
+    var catTestRemainingSeconds by mutableStateOf(0)
+    var wasPrereqViolated by mutableStateOf(false)
+    var lastViolationMessage by mutableStateOf<String?>(null)
     
+    // Pre-condition monitoring state
+    var currentCoolantTemp by mutableStateOf<Float?>(null)
+    var currentRpm by mutableStateOf<Float?>(null)
+    var currentLoad by mutableStateOf<Float?>(null)
+    var currentMaf by mutableStateOf<Float?>(null)
+    var isClosedLoop by mutableStateOf(false)
+    
+    // Stability indicators
+    var isRpmStable by mutableStateOf(false)
+    var isLoadStable by mutableStateOf(false)
+    
+    private val rpmBuffer = mutableListOf<Float>()
+    private val loadBuffer = mutableListOf<Float>()
+    
+    val canStartCatTest by derivedStateOf {
+        isCarConnected && 
+        (currentCoolantTemp ?: 0f) >= 80f && 
+        (currentRpm ?: 0f) in 2000f..3000f && 
+        isClosedLoop && 
+        isRpmStable && 
+        isLoadStable
+    }
+
     private var catTestJob: Job? = null
+    private var preMonitorJob: Job? = null
 
     private var usb: UsbObdManager? = null
     private var elm: Elm327Service? = null
@@ -74,41 +104,71 @@ class ObdViewModel : ViewModel() {
                 if (messages.isEmpty() || messages.last().contains("failed", ignoreCase = true) || messages.last().contains("Error")) {
                     messages.clear()
                 }
-                addMessage("Connecting to Adapter...")
+                addMessage("Scanning for USB Adapter...")
             }
 
-            var success = false
-            val maxRetries = 3
+            var hardwareFound = false
+            val scanStartTime = System.currentTimeMillis()
+            val scanTimeoutMs = 10000L // 10 second timeout for scanning/permission
             
-            for (i in 1..maxRetries) {
-                if (i > 1) addMessage("Retry attempt $i of $maxRetries...")
-                
-                val usbManager = UsbObdManager(context)
-                if (usbManager.connect()) {
-                    val service = Elm327Service(usbManager)
-                    if (service.initialize()) {
-                        usb = usbManager
-                        elm = service
-                        success = true
-                        break
-                    } else {
-                        addMessage("ELM327 initialization failed.")
-                        usbManager.close()
+            // 1. Hardware Scan Loop (Wait for permission/detection)
+            var currentUsbManager = usb
+            while (isActive && (System.currentTimeMillis() - scanStartTime) < scanTimeoutMs) {
+                if (currentUsbManager == null) {
+                    currentUsbManager = UsbObdManager(context) { debugMsg ->
+                        addMessage("DEBUG: $debugMsg")
                     }
-                } else {
-                    addMessage("No USB OBD adapter detected.")
+                }
+
+                if (currentUsbManager.connect()) {
+                    usb = currentUsbManager
+                    hardwareFound = true
+                    break
                 }
                 
-                if (i < maxRetries) delay(1500)
+                delay(1000) // Retry every second
+                withContext(Dispatchers.Main) {
+                    val remaining = ((scanTimeoutMs - (System.currentTimeMillis() - scanStartTime)) / 1000).toInt()
+                    addMessage("No adapter found. Retrying for $remaining s... (Check for permission popup)")
+                }
+            }
+
+            if (!hardwareFound) {
+                withContext(Dispatchers.Main) {
+                    adapterStatus = "Disconnected"
+                    addMessage("Error: No USB adapter detected or permission denied after 10s.")
+                }
+                return@launch
+            }
+
+            // 2. ELM327 Initialization (Now that hardware is confirmed)
+            addMessage("Hardware link established. Initializing ELM327...")
+            var serviceSuccess = false
+            val maxServiceRetries = 3
+            
+            for (i in 1..maxServiceRetries) {
+                if (i > 1) addMessage("ELM327 retry attempt $i...")
+                
+                val service = Elm327Service(usb!!) { debugMsg ->
+                    addMessage("DEBUG: $debugMsg")
+                }
+                
+                if (service.initialize()) {
+                    elm = service
+                    serviceSuccess = true
+                    break
+                }
+                
+                if (i < maxServiceRetries) delay(1000)
             }
 
             withContext(Dispatchers.Main) {
-                if (success) {
+                if (serviceSuccess) {
                     adapterStatus = "Connected"
-                    addMessage("Adapter: ELM327 connected.")
+                    addMessage("Adapter: ELM327 connected and ready.")
                 } else {
                     adapterStatus = "Disconnected"
-                    addMessage("Error: Failed to connect to adapter after $maxRetries attempts.")
+                    addMessage("Error: Hardware found, but ELM327 protocol failed to respond.")
                 }
             }
         }
@@ -150,14 +210,32 @@ class ObdViewModel : ViewModel() {
         }
     }
 
-    fun disconnect() {
+    fun cleanup() {
         stopGraphing()
+        stopCatTest()
+        stopPreMonitor()
+        
+        currentCoolantTemp = null
+        currentRpm = null
+        isClosedLoop = false
+
         usb?.close()
         usb = null
         elm = null
         adapterStatus = "Disconnected"
         carStatus = "Disconnected"
+    }
+
+    fun disconnect() {
+        stopPreMonitor()
+        stopGraphing()
+        cleanup()
         addMessage("Disconnected.")
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        cleanup()
     }
 
     fun exitApp() {
@@ -167,12 +245,14 @@ class ObdViewModel : ViewModel() {
     }
 
     fun readDtc() {
-        if (elm == null) return
+        if (elm == null || isCommandExecuting) return
+        isCommandExecuting = true
         addMessage("Reading Diagnostic Trouble Codes...")
         viewModelScope.launch(Dispatchers.IO) {
             val data = elm?.readDtc()
             if (data == null) {
                 addMessage("Error: Failed to read from car.")
+                isCommandExecuting = false
                 return@launch
             }
             addMessage("Raw response: $data")
@@ -183,19 +263,25 @@ class ObdViewModel : ViewModel() {
                     addMessage("Success: No active DTCs found.")
                 } else {
                     addMessage("Results: Found ${parsed.size} codes.")
+                    parsed.forEach { code ->
+                        addMessage("Result: $code")
+                    }
                 }
+                isCommandExecuting = false
             }
         }
     }
 
     fun clearDtc() {
-        if (elm == null) return
+        if (elm == null || isCommandExecuting) return
+        isCommandExecuting = true
         addMessage("Clearing Diagnostic Trouble Codes...")
         viewModelScope.launch(Dispatchers.IO) {
             elm?.clearDtc()
             addMessage("Clear command sent to ECU.")
             withContext(Dispatchers.Main) {
                 dtcs = emptyList()
+                isCommandExecuting = false
             }
         }
     }
@@ -233,13 +319,13 @@ class ObdViewModel : ViewModel() {
                     if (value != null) {
                         withContext(Dispatchers.Main) {
                             graphData.add(value)
-                            if (graphData.size > 50) {
+                            if (graphData.size > 100) { // Increased history for faster sampling
                                 graphData.removeAt(0)
                             }
                         }
                     }
                 }
-                delay(200) // 5Hz sampling
+                delay(100) // 10Hz sampling (increased from 5Hz)
             }
         }
     }
@@ -257,43 +343,42 @@ class ObdViewModel : ViewModel() {
         isCatTestRunning = true
         catTestResult = null
         catTestProgress = 0f
+        catTestRemainingSeconds = 30
+        wasPrereqViolated = false
+        lastViolationMessage = null
         
         catTestJob = viewModelScope.launch(Dispatchers.IO) {
             val s1Data = mutableListOf<Float>()
             val s2Data = mutableListOf<Float>()
+            val totalSamples = 150 // 30 seconds at 5Hz
+            val startTime = System.currentTimeMillis()
             
-            while (isActive && isCatTestRunning) {
+            while (isActive && isCatTestRunning && s1Data.size < totalSamples) {
                 // Check prerequisites
-                val temp = LiveDataParser.parse(service.readCoolant(), "0105") ?: 0f
-                val rpm = LiveDataParser.parse(service.readRpm(), "010C") ?: 0f
-                val statusValue = LiveDataParser.parse(service.readFuelSystemStatus(), "0103")?.toInt() ?: 0
+                val temp = currentCoolantTemp ?: 0f
+                val rpm = currentRpm ?: 0f
                 
-                val isClosedLoop = (statusValue and 0x02) != 0
                 val isTempOk = temp >= 80f
                 val isRpmOk = rpm in 2000f..3000f
+                val isLoopOk = isClosedLoop
                 
-                if (!isTempOk || !isRpmOk || !isClosedLoop) {
-                    withContext(Dispatchers.Main) {
-                        catTestStatus = buildString {
-                            append("Waiting for prerequisites: ")
-                            if (!isTempOk) append("Temp < 80°C (${temp.toInt()}°C). ")
-                            if (!isRpmOk) append("RPM 2000-3000 (${rpm.toInt()}). ")
-                            if (!isClosedLoop) append("Need Closed Loop. ")
-                        }
-                        catTestProgress = 0f
+                if (!isTempOk || !isRpmOk || !isLoopOk) {
+                    wasPrereqViolated = true
+                    val reason = buildString {
+                        if (!isTempOk) append("Temp low. ")
+                        if (!isRpmOk) append("RPM out of range. ")
+                        if (!isLoopOk) append("Open Loop. ")
                     }
-                    s1Data.clear()
-                    s2Data.clear()
-                    delay(1000)
-                    continue
+                    withContext(Dispatchers.Main) {
+                        lastViolationMessage = "Warning: $reason"
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        lastViolationMessage = null
+                    }
                 }
                 
-                // Prerequisites met, collect data
-                withContext(Dispatchers.Main) {
-                    catTestStatus = "Collecting samples... (${s1Data.size}/50)"
-                    catTestProgress = s1Data.size / 50f
-                }
-                
+                // Collect data regardless of violations (per requirement)
                 val s1 = LiveDataParser.parse(service.readO2VoltageB1S1(), "0114")
                 val s2 = LiveDataParser.parse(service.readO2VoltageB1S2(), "0115")
                 
@@ -301,23 +386,51 @@ class ObdViewModel : ViewModel() {
                     s1Data.add(s1)
                     s2Data.add(s2)
                 }
-                
-                if (s1Data.size >= 50) {
-                    val corr = calculateCorrelation(s1Data, s2Data)
-                    withContext(Dispatchers.Main) {
-                        isCatTestRunning = false
-                        catTestProgress = 1f
-                        catTestStatus = "Test Complete"
-                        catTestResult = when {
-                            corr < 0.3f -> "Result: SUCCESS (Corr: ${"%.2f".format(corr)}). Catalysator is fine."
-                            corr <= 0.6f -> "Result: BORDERLINE (Corr: ${"%.2f".format(corr)}). Catalysator is aging."
-                            else -> "Result: FAILED (Corr: ${"%.2f".format(corr)}). Catalysator is worn."
-                        }
-                        addMessage("Catalyst Test Result: $catTestResult")
-                    }
-                    break
+
+                val elapsed = System.currentTimeMillis() - startTime
+                withContext(Dispatchers.Main) {
+                    catTestProgress = s1Data.size.toFloat() / totalSamples
+                    catTestRemainingSeconds = (30 - (elapsed / 1000)).toInt().coerceAtLeast(0)
+                    catTestStatus = "Running Test... ${catTestRemainingSeconds}s left"
                 }
-                delay(200) // 5Hz
+                
+                delay(200) // 5Hz sampling
+            }
+            
+            if (s1Data.size >= 50) { // Require at least some data to calculate
+                val corr = calculateCorrelation(s1Data, s2Data)
+                val stdS1 = calculateStandardDeviation(s1Data)
+                val stdS2 = calculateStandardDeviation(s2Data)
+                
+                val damping = if (stdS1 > 0) (1f - (stdS2 / stdS1)).coerceIn(0f, 1f) else 0f
+                val invCorr = (1f - corr).coerceIn(0f, 1f)
+                
+                val efficiency = (0.5f * invCorr) + (0.5f * damping)
+                val efficiencyPct = (efficiency * 100).toInt()
+                
+                withContext(Dispatchers.Main) {
+                    isCatTestRunning = false
+                    catTestProgress = 1f
+                    catTestStatus = "Test Complete"
+                    val baseResult = when {
+                        efficiencyPct >= 75 -> "SUCCESS ($efficiencyPct%)"
+                        efficiencyPct >= 50 -> "BORDERLINE ($efficiencyPct%)"
+                        else -> "FAILED ($efficiencyPct%)"
+                    }
+                    
+                    catTestResult = if (wasPrereqViolated) {
+                        "Result: $baseResult. (Warning: Prerequisites were violated during test, result might be inaccurate)."
+                    } else {
+                        "Result: $baseResult. Catalyst is healthy."
+                    }
+                    addMessage("Catalyst Test: $catTestResult")
+                    lastViolationMessage = null
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    isCatTestRunning = false
+                    catTestStatus = "Test Failed: Insufficient Data"
+                }
             }
         }
     }
@@ -327,6 +440,80 @@ class ObdViewModel : ViewModel() {
         catTestJob?.cancel()
         catTestJob = null
         catTestStatus = "Stopped"
+    }
+
+    fun startPreMonitor() {
+        if (preMonitorJob != null || elm == null) return
+        
+        preMonitorJob = viewModelScope.launch(Dispatchers.IO) {
+            val service = elm ?: return@launch
+            while (isActive) {
+                try {
+                    val coolantResp = service.readCoolant()
+                    val rpmResp = service.readRpm()
+                    val fuelResp = service.readFuelSystemStatus()
+                    
+                    val temp = LiveDataParser.parse(coolantResp, "0105")
+                    val rpmValue = LiveDataParser.parse(rpmResp, "010C")
+                    val statusValue = LiveDataParser.parse(fuelResp, "0103")?.toInt() ?: 0
+                    
+                    // New: Automatic Load/MAF detection
+                    val loadResp = service.readLoad()
+                    var loadValue = LiveDataParser.parse(loadResp, "0104")
+                    var mafValue: Float? = null
+                    
+                    if (loadValue == null) {
+                        val mafResp = service.readMAF()
+                        mafValue = LiveDataParser.parse(mafResp, "0110")
+                    }
+                    
+                    withContext(Dispatchers.Main) {
+                        currentCoolantTemp = temp
+                        currentRpm = rpmValue
+                        currentLoad = loadValue
+                        currentMaf = mafValue
+                        isClosedLoop = (statusValue and 0x02) != 0
+                        
+                        // Update stability buffers (last 5 samples ~5 seconds)
+                        if (rpmValue != null) {
+                            rpmBuffer.add(rpmValue)
+                            if (rpmBuffer.size > 5) rpmBuffer.removeAt(0)
+                        }
+                        
+                        val activeLoadValue = loadValue ?: mafValue
+                        if (activeLoadValue != null) {
+                            loadBuffer.add(activeLoadValue)
+                            if (loadBuffer.size > 5) loadBuffer.removeAt(0)
+                        }
+                        
+                        // Check Stability
+                        if (rpmBuffer.size >= 3) {
+                            val rpmRange = rpmBuffer.max() - rpmBuffer.min()
+                            isRpmStable = rpmRange < 100f
+                        } else {
+                            isRpmStable = false
+                        }
+                        
+                        if (loadBuffer.size >= 3) {
+                            val avgLoad = loadBuffer.average().toFloat()
+                            val loadStdDev = calculateStandardDeviation(loadBuffer)
+                            // Fluctuation < 5%
+                            isLoadStable = if (avgLoad > 0) (loadStdDev / avgLoad) < 0.05f else false
+                        } else {
+                            isLoadStable = false
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Ignore transient errors
+                }
+                delay(1000) // Poll every second
+            }
+        }
+    }
+
+    fun stopPreMonitor() {
+        preMonitorJob?.cancel()
+        preMonitorJob = null
     }
 
     private fun calculateCorrelation(x: List<Float>, y: List<Float>): Float {
@@ -343,22 +530,41 @@ class ObdViewModel : ViewModel() {
         return if (denominator == 0f) 0f else numerator / denominator
     }
 
+    private fun calculateStandardDeviation(data: List<Float>): Float {
+        if (data.isEmpty()) return 0f
+        val mean = data.average().toFloat()
+        val variance = data.map { (it - mean) * (it - mean) }.average().toFloat()
+        return sqrt(variance)
+    }
+
     fun runCommand(commandName: String) {
-        val service = elm ?: return
-        addMessage("Running: $commandName")
-        viewModelScope.launch(Dispatchers.IO) {
-            val response = when (commandName) {
-                "Read RPM" -> service.readRpm()
-                "Read Speed" -> service.readSpeed()
-                "Read Coolant Temp" -> service.readCoolant()
-                "Read VIN" -> service.readVin()
-                "Read Pending DTCs" -> service.readPendingDtc()
-                "Read Lambda" -> service.readLambda()
-                "Read O2 Voltage B1S1" -> service.readO2VoltageB1S1()
-                "Read O2 Voltage B1S2" -> service.readO2VoltageB1S2()
-                else -> "Unknown command"
+        if (isCommandExecuting) return
+        
+        when (commandName) {
+            "Read DTCs" -> readDtc()
+            "Clear DTCs" -> clearDtc()
+            else -> {
+                val service = elm ?: return
+                isCommandExecuting = true
+                addMessage("Running: $commandName")
+                viewModelScope.launch(Dispatchers.IO) {
+                    val response = when (commandName) {
+                        "Read RPM" -> service.readRpm()
+                        "Read Speed" -> service.readSpeed()
+                        "Read Coolant Temp" -> service.readCoolant()
+                        "Read VIN" -> service.readVin()
+                        "Read Pending DTCs" -> service.readPendingDtc()
+                        "Read Lambda" -> service.readLambda()
+                        "Read O2 Voltage B1S1" -> service.readO2VoltageB1S1()
+                        "Read O2 Voltage B1S2" -> service.readO2VoltageB1S2()
+                        else -> "Unknown command"
+                    }
+                    withContext(Dispatchers.Main) {
+                        addMessage("Result: $response")
+                        isCommandExecuting = false
+                    }
+                }
             }
-            addMessage("Response: $response")
         }
     }
 }

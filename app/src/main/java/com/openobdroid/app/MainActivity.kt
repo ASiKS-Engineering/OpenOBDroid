@@ -9,7 +9,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.collectLatest
 
@@ -23,9 +22,6 @@ class MainActivity : ComponentActivity() {
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     obdViewModel?.disconnect()
                 }
-                UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                    context?.let { obdViewModel?.connectAdapter(it) }
-                }
             }
         }
     }
@@ -33,21 +29,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val filter = IntentFilter().apply {
-            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
-            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
-        }
+        val filter = IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED)
         registerReceiver(usbReceiver, filter)
 
         setContent {
             val viewModel: ObdViewModel = viewModel()
             obdViewModel = viewModel
-            val context = LocalContext.current
 
             LaunchedEffect(Unit) {
-                // Auto-detect adapter on app start
-                viewModel.connectAdapter(context)
-
                 viewModel.events.collectLatest { event ->
                     when (event) {
                         is ObdViewModel.ObdEvent.CloseApp -> finish()
@@ -63,6 +52,6 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         unregisterReceiver(usbReceiver)
         // Close USB OBD connection
-        obdViewModel?.cleanup()
+        obdViewModel?.disconnect()
     }
 }

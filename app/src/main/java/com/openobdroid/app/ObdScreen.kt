@@ -5,9 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
@@ -21,8 +19,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,7 +40,7 @@ fun ObdScreen(
                     Column {
                         Text("OpenOBDroid", fontWeight = FontWeight.Bold)
                         Text(
-                            text = "v${BuildConfig.VERSION_NAME}",
+                            text = "v${BuildConfig.VERSION_NAME} by ASiKS-Engineering",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                         )
@@ -103,6 +104,20 @@ fun ObdScreen(
 
 @Composable
 fun CatTestTab(vm: ObdViewModel) {
+    LaunchedEffect(vm.isCarConnected) {
+        if (vm.isCarConnected) {
+            vm.startPreMonitor()
+        } else {
+            vm.stopPreMonitor()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            vm.stopPreMonitor()
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -123,11 +138,37 @@ fun CatTestTab(vm: ObdViewModel) {
 
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("Prerequisites:", style = MaterialTheme.typography.titleSmall)
-                BulletPoint("Coolant Temp >= 80°C")
-                BulletPoint("RPM: 2000 - 3000")
-                BulletPoint("Fuel System: Closed Loop")
-                BulletPoint("Condition: Constant Load")
+                Text("Prerequisites Status:", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(8.dp))
+                
+                val temp = vm.currentCoolantTemp
+                val rpm = vm.currentRpm
+                
+                val tempLabel = if (vm.isCarConnected && temp != null) "${temp.toInt()}°C" else "no data"
+                val rpmLabel = if (vm.isCarConnected && rpm != null) "${rpm.toInt()}" else "no data"
+                val loopLabel = if (vm.isCarConnected) (if (vm.isClosedLoop) "Closed" else "Open") else "no data"
+                val loadType = if (vm.currentLoad != null) "Load" else if (vm.currentMaf != null) "MAF" else "Load/MAF"
+                
+                PrereqItem(
+                    label = "Coolant Temp >= 80°C ($tempLabel)",
+                    isMet = vm.isCarConnected && temp != null && temp >= 80f
+                )
+                PrereqItem(
+                    label = "RPM: 2000 - 3000 ($rpmLabel)",
+                    isMet = vm.isCarConnected && rpm != null && rpm in 2000f..3000f
+                )
+                PrereqItem(
+                    label = "Fuel System: Closed Loop ($loopLabel)",
+                    isMet = vm.isCarConnected && vm.isClosedLoop
+                )
+                PrereqItem(
+                    label = "RPM Stability (< 100 fluctuation)",
+                    isMet = vm.isCarConnected && vm.isRpmStable
+                )
+                PrereqItem(
+                    label = "Constant $loadType (< 5% fluctuation)",
+                    isMet = vm.isCarConnected && vm.isLoadStable
+                )
             }
         }
 
@@ -146,8 +187,18 @@ fun CatTestTab(vm: ObdViewModel) {
                     text = vm.catTestStatus,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(vertical = 8.dp)
+                    modifier = Modifier.padding(vertical = 4.dp)
                 )
+                
+                if (vm.lastViolationMessage != null) {
+                    Text(
+                        text = vm.lastViolationMessage ?: "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
                 
                 LinearProgressIndicator(
                     progress = { vm.catTestProgress },
@@ -160,7 +211,7 @@ fun CatTestTab(vm: ObdViewModel) {
                     onClick = {
                         if (vm.isCatTestRunning) vm.stopCatTest() else vm.startCatTest()
                     },
-                    enabled = vm.isCarConnected,
+                    enabled = vm.canStartCatTest || vm.isCatTestRunning,
                     modifier = Modifier.fillMaxWidth(),
                     colors = if (vm.isCatTestRunning) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                              else ButtonDefaults.buttonColors()
@@ -209,21 +260,34 @@ fun CatTestTab(vm: ObdViewModel) {
 }
 
 @Composable
-fun BulletPoint(text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
-        Spacer(Modifier.width(8.dp))
-        Text(text, style = MaterialTheme.typography.bodySmall)
+fun PrereqItem(label: String, isMet: Boolean) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(vertical = 4.dp)
+    ) {
+        Icon(
+            imageVector = if (isMet) Icons.Default.CheckCircle else Icons.Default.Cancel,
+            contentDescription = null,
+            tint = if (isMet) Color(0xFF4CAF50) else Color(0xFFF44336),
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isMet) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error
+        )
     }
 }
 
 @Composable
 fun DashboardTab(vm: ObdViewModel, context: android.content.Context) {
+    var selectedCommand by remember { mutableStateOf(vm.availableCommands[0]) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Status Card
@@ -284,53 +348,132 @@ fun DashboardTab(vm: ObdViewModel, context: android.content.Context) {
                 containerColor = MaterialTheme.colorScheme.surfaceVariant
             )
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Diagnostics", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(12.dp))
                 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton(
-                        icon = Icons.Default.Search,
-                        label = "Read DTCs",
-                        enabled = vm.isCarConnected,
-                        onClick = { vm.readDtc() },
-                        modifier = Modifier.weight(1f)
-                    )
-                    ActionButton(
-                        icon = Icons.Default.DeleteSweep,
-                        label = "Clear DTCs",
-                        enabled = vm.isCarConnected,
-                        onClick = { vm.clearDtc() },
-                        modifier = Modifier.weight(1f)
-                    )
+                CommandSelectionRow(
+                    vm = vm,
+                    selectedCommand = selectedCommand,
+                    onCommandSelected = { selectedCommand = it }
+                )
+
+                if (vm.isCommandExecuting) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
-                
-                Spacer(Modifier.height(12.dp))
-                
-                CommandDropdown(vm)
+
+                Button(
+                    onClick = { vm.runCommand(selectedCommand) },
+                    enabled = vm.isCarConnected && !vm.isCommandExecuting,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.small
+                ) {
+                    Icon(if (vm.isCommandExecuting) Icons.Default.HourglassEmpty else Icons.Default.PlayArrow, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (vm.isCommandExecuting) "Executing..." else "Execute Command")
+                }
             }
         }
 
-        // Results Section
-        if (vm.dtcs.isNotEmpty()) {
-            Text("Active Trouble Codes", style = MaterialTheme.typography.titleMedium)
-            vm.dtcs.forEach { dtc ->
-                DtcItem(dtc)
-            }
-        } else if (vm.isCarConnected) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.secondaryContainer
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50))
-                    Spacer(Modifier.width(12.dp))
-                    Text("No active DTCs found.", style = MaterialTheme.typography.bodyMedium)
+        // Results Section - Scrollable List
+        Text("Command Results", style = MaterialTheme.typography.titleMedium)
+        
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        ) {
+            val results = vm.messages.filter { it.startsWith("Result:") || it.startsWith("Success:") || it.startsWith("Error:") || it.contains("Results:") }
+            val listState = rememberLazyListState()
+            
+            LaunchedEffect(results.size) {
+                if (results.isNotEmpty()) {
+                    listState.animateScrollToItem(results.size - 1)
                 }
+            }
+
+            if (results.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No results to display", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(results) { result ->
+                        ResultItem(result)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ResultItem(text: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                text.startsWith("Error:") -> MaterialTheme.colorScheme.errorContainer
+                text.startsWith("Success:") -> Color(0xFFE8F5E9)
+                else -> MaterialTheme.colorScheme.secondaryContainer
+            }
+        )
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(8.dp),
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CommandSelectionRow(
+    vm: ObdViewModel,
+    selectedCommand: String,
+    onCommandSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        OutlinedTextField(
+            value = selectedCommand,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Commands") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+            enabled = vm.isCarConnected,
+            textStyle = MaterialTheme.typography.bodyMedium
+        )
+
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            vm.availableCommands.forEach { command ->
+                DropdownMenuItem(
+                    text = { Text(command) },
+                    onClick = {
+                        onCommandSelected(command)
+                        expanded = false
+                    }
+                )
             }
         }
     }
@@ -345,6 +488,12 @@ fun GraphTab(vm: ObdViewModel) {
         "Read Lambda",
         "Read O2 Voltage B1S1",
         "Read O2 Voltage B1S2"
+    )
+
+    val textMeasurer = rememberTextMeasurer()
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 10.sp
     )
 
     Column(
@@ -417,23 +566,76 @@ fun GraphTab(vm: ObdViewModel) {
                     val data = vm.graphData.toList()
                     val maxVal = (data.maxOrNull() ?: 1f).coerceAtLeast(1f)
                     val minVal = (data.minOrNull() ?: 0f)
+                    val range = (maxVal - minVal).coerceAtLeast(0.1f)
                     
+                    val primaryColor = MaterialTheme.colorScheme.primary
+                    val gridColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    val axisColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+
                     Column {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("${maxVal.toInt()}", style = MaterialTheme.typography.labelSmall)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                             Text(vm.selectedPidForGraph, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                            Text("${data.last().toInt()}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
+                            Spacer(Modifier.width(8.dp))
+                            Text("${data.last().toInt()}", color = primaryColor, fontWeight = FontWeight.ExtraBold)
                         }
                         
-                        Canvas(modifier = Modifier.fillMaxSize().padding(vertical = 8.dp)) {
-                            val width = size.width
-                            val height = size.height
-                            val spacing = width / 50f
+                        Canvas(modifier = Modifier.fillMaxSize().padding(top = 8.dp)) {
+                            val labelAreaWidth = 45.dp.toPx()
+                            val labelAreaHeight = 20.dp.toPx()
+                            val graphWidth = size.width - labelAreaWidth
+                            val graphHeight = size.height - labelAreaHeight
                             
+                            // 1. Draw Grid lines and Y-axis scale labels
+                            val ySteps = 4
+                            for (i in 0..ySteps) {
+                                val y = graphHeight - (i * graphHeight / ySteps)
+                                val labelValue = minVal + (i * (maxVal - minVal) / ySteps)
+                                
+                                // Grid line
+                                drawLine(
+                                    color = gridColor,
+                                    start = androidx.compose.ui.geometry.Offset(labelAreaWidth, y),
+                                    end = androidx.compose.ui.geometry.Offset(size.width, y),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                                
+                                // Label
+                                drawText(
+                                    textMeasurer = textMeasurer,
+                                    text = labelValue.toInt().toString(),
+                                    style = labelStyle,
+                                    topLeft = androidx.compose.ui.geometry.Offset(5.dp.toPx(), y - 7.dp.toPx())
+                                )
+                            }
+                            
+                            // 2. Draw Axis Lines
+                            drawLine( // Y-Axis
+                                color = axisColor,
+                                start = androidx.compose.ui.geometry.Offset(labelAreaWidth, 0f),
+                                end = androidx.compose.ui.geometry.Offset(labelAreaWidth, graphHeight),
+                                strokeWidth = 2.dp.toPx()
+                            )
+                            drawLine( // X-Axis
+                                color = axisColor,
+                                start = androidx.compose.ui.geometry.Offset(labelAreaWidth, graphHeight),
+                                end = androidx.compose.ui.geometry.Offset(size.width, graphHeight),
+                                strokeWidth = 2.dp.toPx()
+                            )
+
+                            // 3. Draw X-Axis Label
+                            drawText(
+                                textMeasurer = textMeasurer,
+                                text = "Samples (History)",
+                                style = labelStyle,
+                                topLeft = androidx.compose.ui.geometry.Offset(labelAreaWidth + (graphWidth / 2) - 40.dp.toPx(), size.height - 18.dp.toPx())
+                            )
+
+                            // 4. Draw Data Path
+                            val xSpacing = graphWidth / 100f
                             val path = Path()
                             data.forEachIndexed { index, value ->
-                                val x = index * spacing
-                                val y = height - ((value - minVal) / (maxVal - minVal + 1) * height)
+                                val x = labelAreaWidth + (index * xSpacing)
+                                val y = graphHeight - ((value - minVal) / range * graphHeight)
                                 
                                 if (index == 0) path.moveTo(x, y)
                                 else path.lineTo(x, y)
@@ -441,8 +643,12 @@ fun GraphTab(vm: ObdViewModel) {
                             
                             drawPath(
                                 path = path,
-                                color = Color(0xFF2196F3),
-                                style = Stroke(width = 3.dp.toPx())
+                                color = primaryColor,
+                                style = Stroke(
+                                    width = 3.dp.toPx(),
+                                    cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                                    join = androidx.compose.ui.graphics.StrokeJoin.Round
+                                )
                             )
                         }
                     }
@@ -469,85 +675,6 @@ fun StatusIndicator(label: String, status: String, isConnected: Boolean) {
             fontWeight = FontWeight.Bold,
             color = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
         )
-    }
-}
-
-@Composable
-fun ActionButton(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    OutlinedButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier,
-        shape = MaterialTheme.shapes.small
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, contentDescription = null)
-            Text(label, style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}
-
-@Composable
-fun DtcItem(dtc: String) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = dtc,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun CommandDropdown(vm: ObdViewModel) {
-    var expanded by remember { mutableStateOf(false) }
-    var selectedCommand by remember { mutableStateOf(vm.availableCommands[0]) }
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = !expanded },
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        OutlinedTextField(
-            value = selectedCommand,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("Extra Commands") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                .fillMaxWidth(),
-            enabled = vm.isCarConnected,
-            textStyle = MaterialTheme.typography.bodyMedium
-        )
-
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            vm.availableCommands.forEach { command ->
-                DropdownMenuItem(
-                    text = { Text(command) },
-                    onClick = {
-                        selectedCommand = command
-                        expanded = false
-                        vm.runCommand(command)
-                    }
-                )
-            }
-        }
     }
 }
 

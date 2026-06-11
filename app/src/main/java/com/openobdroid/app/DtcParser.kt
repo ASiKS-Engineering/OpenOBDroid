@@ -47,6 +47,23 @@ object DtcParser {
         "P0601" to "Internal Control Module Memory Check Sum Error",
         "P0700" to "Transmission Control System Malfunction",
         "P0705" to "Transmission Range Sensor Circuit Malfunction (PRNDL Input)",
+        "P0305" to "Cylinder 5 Misfire Detected",
+        "P0306" to "Cylinder 6 Misfire Detected",
+        "P0307" to "Cylinder 7 Misfire Detected",
+        "P0308" to "Cylinder 8 Misfire Detected",
+        "P0411" to "Secondary Air Injection System Incorrect Flow Detected",
+        "P0422" to "Main Catalyst Efficiency Below Threshold (Bank 1)",
+        "P0441" to "Evaporative Emission Control System Incorrect Purge Flow",
+        "P0443" to "Evaporative Emission Control System Purge Control Valve Circuit Malfunction",
+        "P0446" to "Evaporative Emission Control System Vent Control Circuit Malfunction",
+        "P0455" to "Evaporative Emission Control System Leak Detected (Gross Leak)",
+        "P0460" to "Fuel Level Sensor Circuit Malfunction",
+        "P0501" to "Vehicle Speed Sensor Range/Performance",
+        "P0506" to "Idle Control System RPM Lower Than Expected",
+        "P0507" to "Idle Control System RPM Higher Than Expected",
+        "P0603" to "Internal Control Module Keep Alive Memory (KAM) Error",
+        "P1135" to "Air/Fuel Sensor Heater Circuit (Bank 1 Sensor 1)",
+        "P1155" to "Air/Fuel Sensor Heater Circuit (Bank 2 Sensor 1)",
         
         // Chassis (C)
         "C0035" to "Left Front Wheel Speed Sensor Malfunction",
@@ -97,7 +114,7 @@ object DtcParser {
                 break
 
             val decodedCode = decode(codeHex)
-            val description = commonCodes[decodedCode] ?: "Generic/Manufacturer Specific Code"
+            val description = commonCodes[decodedCode] ?: getGenericDescription(decodedCode)
             
             result.add("$decodedCode: $description")
 
@@ -105,6 +122,20 @@ object DtcParser {
         }
 
         return result
+    }
+
+    private fun getGenericDescription(code: String): String {
+        val type = when (code.firstOrNull()) {
+            'P' -> "Powertrain"
+            'C' -> "Chassis"
+            'B' -> "Body"
+            'U' -> "Network"
+            else -> "Unknown"
+        }
+        val isManufacturer = code.getOrNull(1) != '0'
+        val origin = if (isManufacturer) "Manufacturer Specific" else "Generic OBD-II"
+        
+        return "$origin $type Code"
     }
 
     private fun decode(

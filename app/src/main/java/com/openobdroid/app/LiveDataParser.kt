@@ -41,6 +41,11 @@ object LiveDataParser {
                     val b = clean.substring(dataIndex + 2, dataIndex + 4).toInt(16)
                     ((a * 256) + b) / 32768.0f
                 }
+                "10" -> { // MAF
+                    val a = clean.substring(dataIndex, dataIndex + 2).toInt(16)
+                    val b = clean.substring(dataIndex + 2, dataIndex + 4).toInt(16)
+                    ((a * 256) + b) / 100.0f
+                }
                 else -> null
             }
         } catch (e: Exception) {

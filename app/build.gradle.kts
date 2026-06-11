@@ -32,10 +32,19 @@ android {
         minSdk = 24
         // Target API level used for testing and optimizing the app
         targetSdk = 35
-        // Internal version number used to determine which version is more recent
-        versionCode = 2
+
+        // Generate build metadata
+        val timestamp = System.currentTimeMillis()
+        // Use a simple format for build number
+        val buildNumber = (timestamp / 1000).toString().takeLast(9)
+        
+        // Internal version number
+        versionCode = buildNumber.toInt()
         // Publicly visible version string
-        versionName = "1.1.0"
+        versionName = "1.1.0 (Build $buildNumber)"
+
+        // Add build info to BuildConfig
+        buildConfigField("String", "BUILD_ID", "\"$buildNumber\"")
     }
 
     compileOptions {
