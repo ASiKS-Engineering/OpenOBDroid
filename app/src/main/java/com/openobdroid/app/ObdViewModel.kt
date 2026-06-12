@@ -356,8 +356,12 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
             val s2Data = mutableListOf<Float>()
             val totalSamples = 150 // 30 seconds at 5Hz
             val startTime = System.currentTimeMillis()
+            val durationMs = 30000L
             
-            while (isActive && isCatTestRunning && s1Data.size < totalSamples) {
+            while (isActive && isCatTestRunning) {
+                val elapsed = System.currentTimeMillis() - startTime
+                if (elapsed >= durationMs) break
+
                 // Check prerequisites
                 val temp = currentCoolantTemp ?: 0f
                 val rpm = currentRpm ?: 0f
@@ -389,11 +393,15 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
                 if (s1 != null && s2 != null) {
                     s1Data.add(s1)
                     s2Data.add(s2)
+                    // Overwrite old data once buffer is full (sliding window)
+                    if (s1Data.size > totalSamples) {
+                        s1Data.removeAt(0)
+                        s2Data.removeAt(0)
+                    }
                 }
 
-                val elapsed = System.currentTimeMillis() - startTime
                 withContext(Dispatchers.Main) {
-                    catTestProgress = s1Data.size.toFloat() / totalSamples
+                    catTestProgress = (elapsed.toFloat() / durationMs).coerceIn(0f, 1f)
                     catTestRemainingSeconds = (30 - (elapsed / 1000)).toInt().coerceAtLeast(0)
                     catTestStatus = "Running Test... ${catTestRemainingSeconds}s left"
                 }
@@ -444,6 +452,13 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
         catTestJob?.cancel()
         catTestJob = null
         catTestStatus = "Stopped"
+        
+        // Clear all calculations when stopped
+        catTestResult = null
+        catTestProgress = 0f
+        catTestRemainingSeconds = 0
+        wasPrereqViolated = false
+        lastViolationMessage = null
     }
 
     fun startPreMonitor() {
