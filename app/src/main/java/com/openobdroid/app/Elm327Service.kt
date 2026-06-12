@@ -85,13 +85,6 @@ class Elm327Service(
         val rawResponse = usb.readUntilPrompt()
             .replace(">", "")
             .trim()
-            
-        // Log raw response for debugging
-        if (rawResponse.isNotBlank()) {
-            val hex = rawResponse.map { "%02X".format(it.code) }.joinToString(" ")
-            onDebugMessage?.invoke("RAW [$cmd]: ${rawResponse.replace("\r", "\\r").replace("\n", "\\n")}")
-            onDebugMessage?.invoke("HEX [$cmd]: $hex")
-        }
 
         // Split by lines and remove the echoed command if it's the first line
         val lines = rawResponse.split(Regex("[\r\n]+")).filter { it.isNotBlank() }

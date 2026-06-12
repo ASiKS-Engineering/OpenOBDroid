@@ -24,9 +24,13 @@ class UsbObdManager(
         if (count <= 0)
             return false
 
-        onDebugMessage?.invoke("D2xxManager: Opening device at index 0...")
+        onDebugMessage?.invoke("D2xxManager: Opening device at index 0 with optimized parameters...")
+        val params = D2xxManager.DriverParameters().apply {
+            setReadTimeout(500) // Reduce from default 5000ms to 500ms
+        }
+
         device =
-            manager.openByIndex(context, 0)
+            manager.openByIndex(context, 0, params)
 
         device?.apply {
             onDebugMessage?.invoke("FT_Device: Configuring baudrate 38400...")
