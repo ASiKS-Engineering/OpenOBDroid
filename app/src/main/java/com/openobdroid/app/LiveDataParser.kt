@@ -24,7 +24,7 @@ object LiveDataParser {
                 "0D" -> { // Speed
                     clean.substring(dataIndex, dataIndex + 2).toInt(16).toFloat()
                 }
-                "05" -> { // Coolant
+                "05", "0F" -> { // Coolant or Intake Air Temp
                     clean.substring(dataIndex, dataIndex + 2).toInt(16).toFloat() - 40f
                 }
                 "04" -> { // Load
@@ -45,6 +45,15 @@ object LiveDataParser {
                     val a = clean.substring(dataIndex, dataIndex + 2).toInt(16)
                     val b = clean.substring(dataIndex + 2, dataIndex + 4).toInt(16)
                     ((a * 256) + b) / 100.0f
+                }
+                "0B" -> { // MAP
+                    clean.substring(dataIndex, dataIndex + 2).toInt(16).toFloat()
+                }
+                "06", "07", "08", "09" -> { // Fuel Trims
+                    (clean.substring(dataIndex, dataIndex + 2).toInt(16) - 128) * 100f / 128f
+                }
+                "11" -> { // Throttle Position
+                    clean.substring(dataIndex, dataIndex + 2).toInt(16) * 100f / 255f
                 }
                 else -> null
             }

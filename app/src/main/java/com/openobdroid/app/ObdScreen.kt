@@ -96,13 +96,11 @@ fun ObdScreen(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text("Dashboard") },
-                    icon = { Icon(Icons.Default.Dashboard, contentDescription = null) }
+                    icon = { Icon(Icons.Default.Dashboard, contentDescription = "Dashboard") }
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text("Live Graph") },
                     icon = {
                         BadgedBox(
                             badge = {
@@ -111,14 +109,13 @@ fun ObdScreen(
                                 }
                             }
                         ) {
-                            Icon(Icons.Default.Timeline, contentDescription = null)
+                            Icon(Icons.Default.Timeline, contentDescription = "Live Graph")
                         }
                     }
                 )
                 Tab(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    text = { Text("Cat Test") },
                     icon = {
                         BadgedBox(
                             badge = {
@@ -129,21 +126,19 @@ fun ObdScreen(
                                 }
                             }
                         ) {
-                            Icon(Icons.Default.Science, contentDescription = null)
+                            Icon(Icons.Default.Science, contentDescription = "Cat Test")
                         }
                     }
                 )
                 Tab(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
-                    text = { Text("Log") },
-                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) }
+                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Log") }
                 )
                 Tab(
                     selected = selectedTab == 4,
                     onClick = { selectedTab = 4 },
-                    text = { Text("Settings") },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = null) }
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") }
                 )
             }
 
@@ -364,7 +359,21 @@ fun PrereqItem(label: String, isMet: Boolean) {
 
 @Composable
 fun DashboardTab(vm: ObdViewModel, context: android.content.Context) {
-    var selectedCommand by remember { mutableStateOf(vm.availableCommands[0]) }
+    var selectedCommand by remember { mutableStateOf(if (vm.availableCommands.isNotEmpty()) vm.availableCommands[0] else "") }
+    
+    // Ensure selectedCommand is valid when list updates
+    LaunchedEffect(vm.availableCommands) {
+        if (selectedCommand.isEmpty() && vm.availableCommands.isNotEmpty()) {
+            selectedCommand = vm.availableCommands[0]
+        } else if (selectedCommand.isNotEmpty() && !vm.availableCommands.contains(selectedCommand)) {
+            // Keep it if it's a static command, otherwise reset
+            if (!selectedCommand.startsWith("Read ")) {
+                // okay
+            } else if (vm.availableCommands.isNotEmpty()) {
+                selectedCommand = vm.availableCommands[0]
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -563,15 +572,6 @@ fun CommandSelectionRow(
 
 @Composable
 fun GraphTab(vm: ObdViewModel) {
-    val graphablePids = listOf(
-        "Read RPM",
-        "Read Speed",
-        "Read Coolant Temp",
-        "Read Lambda",
-        "Read O2 Voltage B1S1",
-        "Read O2 Voltage B1S2"
-    )
-
     val textMeasurer = rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelSmall.copy(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -596,13 +596,13 @@ fun GraphTab(vm: ObdViewModel) {
                     OutlinedButton(
                         onClick = { expanded = true },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = !vm.isGraphing
+                        enabled = !vm.isGraphing && vm.graphablePids.isNotEmpty()
                     ) {
-                        Text(vm.selectedPidForGraph)
+                        Text(if (vm.graphablePids.isEmpty()) "Connect car to see PIDs" else vm.selectedPidForGraph)
                         Icon(Icons.Default.ArrowDropDown, null)
                     }
                     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                        graphablePids.forEach { pid ->
+                        vm.graphablePids.forEach { pid ->
                             DropdownMenuItem(
                                 text = { Text(pid) },
                                 onClick = {

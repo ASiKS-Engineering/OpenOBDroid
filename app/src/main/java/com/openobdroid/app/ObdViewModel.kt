@@ -33,23 +33,48 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     var dtcs by mutableStateOf(emptyList<String>())
     val messages = mutableStateListOf<String>()
 
-    val availableCommands = listOf(
+    private val staticCommands = listOf(
         "Read DTCs",
         "Clear DTCs",
-        "Read RPM",
-        "Read Speed",
-        "Read Coolant Temp",
-        "Read VIN",
         "Read Pending DTCs",
-        "Read Lambda",
-        "Read O2 Voltage B1S1",
-        "Read O2 Voltage B1S2"
+        "Read VIN"
     )
+
+    val availableCommands by derivedStateOf {
+        staticCommands + supportedPids
+            .filter { pidNames.containsKey(it) }
+            .map { "Read ${pidNames[it]}" }
+    }
+
+    private val pidNames = mapOf(
+        "0C" to "Engine RPM",
+        "0D" to "Vehicle Speed",
+        "05" to "Coolant Temp",
+        "04" to "Engine Load",
+        "0B" to "MAP Sensor",
+        "0F" to "Intake Air Temp",
+        "10" to "MAF Flow Rate",
+        "11" to "Throttle Position",
+        "14" to "O2 Voltage B1S1",
+        "15" to "O2 Voltage B1S2",
+        "06" to "STFT Bank 1",
+        "07" to "LTFT Bank 1",
+        "24" to "Lambda B1S1"
+    )
+
+    var supportedPids by mutableStateOf(emptyList<String>())
+    val graphablePids by derivedStateOf {
+        // Only numeric sensor data makes sense for graphs
+        val sensors = listOf("0C", "0D", "04", "0B", "10", "11", "14", "15", "06", "07", "24", "05", "0F")
+        supportedPids
+            .filter { sensors.contains(it) && pidNames.containsKey(it) }
+            .map { pidNames[it]!! }
+    }
 
     // Graphing state
     var isGraphing by mutableStateOf(false)
     var graphData = mutableStateListOf<Float>()
-    var selectedPidForGraph by mutableStateOf("Read RPM")
+    var selectedPidForGraph by mutableStateOf("Engine RPM")
     private var graphingJob: Job? = null
     private var connectionJob: Job? = null
 
@@ -206,6 +231,17 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
                 if (carFound) {
                     carStatus = "Connected"
                     addMessage("System: Connected to vehicle.")
+                    
+                    // Fetch supported PIDs
+                    viewModelScope.launch(Dispatchers.IO) {
+                        val pids = service.getSupportedPids()
+                        withContext(Dispatchers.Main) {
+                            supportedPids = pids
+                            addMessage("Detected ${pids.size} supported PIDs.")
+                            if (pids.contains("0C")) selectedPidForGraph = "Engine RPM"
+                            else if (graphablePids.isNotEmpty()) selectedPidForGraph = graphablePids.first()
+                        }
+                    }
                 } else {
                     carStatus = "Disconnected"
                     addMessage("System: Car ECU not responding. Is the ignition ON?")
@@ -298,27 +334,11 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
         graphingJob = viewModelScope.launch(Dispatchers.IO) {
             val service = elm ?: return@launch
             while (isActive && isGraphing) {
-                val command = when (selectedPidForGraph) {
-                    "Read RPM" -> "010C"
-                    "Read Speed" -> "010D"
-                    "Read Coolant Temp" -> "0105"
-                    "Read Lambda" -> "0124"
-                    "Read O2 Voltage B1S1" -> "0114"
-                    "Read O2 Voltage B1S2" -> "0115"
-                    else -> null
-                }
+                val pidHex = pidNames.entries.find { it.value == selectedPidForGraph }?.key
+                val command = if (pidHex != null) "01$pidHex" else null
                 
                 if (command != null) {
-                    val response = when (selectedPidForGraph) {
-                        "Read RPM" -> service.readRpm()
-                        "Read Speed" -> service.readSpeed()
-                        "Read Coolant Temp" -> service.readCoolant()
-                        "Read Lambda" -> service.readLambda()
-                        "Read O2 Voltage B1S1" -> service.readO2VoltageB1S1()
-                        "Read O2 Voltage B1S2" -> service.readO2VoltageB1S2()
-                        else -> ""
-                    }
-                    
+                    val response = service.runCommandDirect(command)
                     val value = LiveDataParser.parse(response, command)
                     if (value != null) {
                         withContext(Dispatchers.Main) {
@@ -569,26 +589,47 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
         when (commandName) {
             "Read DTCs" -> readDtc()
             "Clear DTCs" -> clearDtc()
-            else -> {
-                val service = elm ?: return
+            "Read Pending DTCs" -> {
+                if (elm == null) return
                 isCommandExecuting = true
-                addMessage("Running: $commandName")
                 viewModelScope.launch(Dispatchers.IO) {
-                    val response = when (commandName) {
-                        "Read RPM" -> service.readRpm()
-                        "Read Speed" -> service.readSpeed()
-                        "Read Coolant Temp" -> service.readCoolant()
-                        "Read VIN" -> service.readVin()
-                        "Read Pending DTCs" -> service.readPendingDtc()
-                        "Read Lambda" -> service.readLambda()
-                        "Read O2 Voltage B1S1" -> service.readO2VoltageB1S1()
-                        "Read O2 Voltage B1S2" -> service.readO2VoltageB1S2()
-                        else -> "Unknown command"
-                    }
+                    val response = elm?.readPendingDtc() ?: "Error"
                     withContext(Dispatchers.Main) {
                         addMessage("Result: $response")
                         isCommandExecuting = false
                     }
+                }
+            }
+            "Read VIN" -> {
+                if (elm == null) return
+                isCommandExecuting = true
+                viewModelScope.launch(Dispatchers.IO) {
+                    val response = elm?.readVin() ?: "Error"
+                    withContext(Dispatchers.Main) {
+                        addMessage("Result: $response")
+                        isCommandExecuting = false
+                    }
+                }
+            }
+            else -> {
+                val service = elm ?: return
+                // Check if it's one of our dynamic PIDs
+                val displayName = commandName.removePrefix("Read ")
+                val pidHex = pidNames.entries.find { it.value == displayName }?.key
+                
+                if (pidHex != null) {
+                    isCommandExecuting = true
+                    addMessage("Running: $commandName")
+                    viewModelScope.launch(Dispatchers.IO) {
+                        val command = "01$pidHex"
+                        val response = service.runCommandDirect(command)
+                        withContext(Dispatchers.Main) {
+                            addMessage("Result: $response")
+                            isCommandExecuting = false
+                        }
+                    }
+                } else {
+                    addMessage("Unknown command: $commandName")
                 }
             }
         }
