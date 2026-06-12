@@ -41,13 +41,38 @@ fun ObdScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("OpenOBDroid", fontWeight = FontWeight.Bold)
-                        Text(
-                            text = "v${BuildConfig.VERSION_NAME} by ASiKS-Engineering",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("OpenOBDroid", fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "v${BuildConfig.VERSION_NAME} by ASiKS-Engineering",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                            )
+                        }
+                        
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(end = 12.dp)
+                        ) {
+                            GlobalStatusIndicator(
+                                icon = Icons.Default.Usb,
+                                label = "Adapter",
+                                isConnected = vm.isAdapterConnected,
+                                isBusy = vm.adapterStatus == "Connecting..."
+                            )
+                            GlobalStatusIndicator(
+                                icon = Icons.Default.DirectionsCar,
+                                label = "Car",
+                                isConnected = vm.isCarConnected,
+                                isBusy = vm.carStatus == "Checking..."
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -78,13 +103,35 @@ fun ObdScreen(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
                     text = { Text("Live Graph") },
-                    icon = { Icon(Icons.Default.Timeline, contentDescription = null) }
+                    icon = {
+                        BadgedBox(
+                            badge = {
+                                if (vm.isGraphing) {
+                                    Badge(containerColor = Color(0xFF4CAF50))
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.Timeline, contentDescription = null)
+                        }
+                    }
                 )
                 Tab(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
                     text = { Text("Cat Test") },
-                    icon = { Icon(Icons.Default.Science, contentDescription = null) }
+                    icon = {
+                        BadgedBox(
+                            badge = {
+                                if (vm.isCatTestRunning || vm.isPreMonitorRunning) {
+                                    Badge(
+                                        containerColor = if (vm.isCatTestRunning) MaterialTheme.colorScheme.error else Color(0xFF4CAF50)
+                                    )
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.Science, contentDescription = null)
+                        }
+                    }
                 )
                 Tab(
                     selected = selectedTab == 3,
@@ -149,7 +196,31 @@ fun CatTestTab(vm: ObdViewModel) {
 
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("Prerequisites Status:", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Prerequisites Status:", style = MaterialTheme.typography.titleSmall)
+                    if (vm.isPreMonitorRunning || vm.isCatTestRunning) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val dotColor = if (vm.isCatTestRunning) MaterialTheme.colorScheme.error else Color(0xFF4CAF50)
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(dotColor)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = if (vm.isCatTestRunning) "TESTING" else "LIVE",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = dotColor,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 
                 val temp = vm.currentCoolantTemp
@@ -817,6 +888,33 @@ fun SettingsTextField(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GlobalStatusIndicator(icon: ImageVector, label: String, isConnected: Boolean, isBusy: Boolean) {
+    val color = when {
+        isConnected -> Color(0xFF4CAF50) // Green
+        isBusy -> Color(0xFFFFC107)      // Yellow
+        else -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.3f)
+    }
+    
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = {
+            PlainTooltip {
+                Text(if (isConnected) "$label: Connected" else if (isBusy) "$label: Connecting..." else "$label: Disconnected")
+            }
+        },
+        state = rememberTooltipState()
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = color,
+            modifier = Modifier.size(24.dp)
         )
     }
 }

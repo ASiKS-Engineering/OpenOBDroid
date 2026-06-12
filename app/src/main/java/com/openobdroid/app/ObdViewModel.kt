@@ -63,6 +63,7 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     var lastViolationMessage by mutableStateOf<String?>(null)
     
     // Pre-condition monitoring state
+    var isPreMonitorRunning by mutableStateOf(false)
     var currentCoolantTemp by mutableStateOf<Float?>(null)
     var currentRpm by mutableStateOf<Float?>(null)
     var currentLoad by mutableStateOf<Float?>(null)
@@ -448,6 +449,7 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     fun startPreMonitor() {
         if (preMonitorJob != null || elm == null) return
         
+        isPreMonitorRunning = true
         preMonitorJob = viewModelScope.launch(Dispatchers.IO) {
             val service = elm ?: return@launch
             addMessage("Starting prerequisite monitoring...")
@@ -520,6 +522,7 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopPreMonitor() {
+        isPreMonitorRunning = false
         preMonitorJob?.cancel()
         preMonitorJob = null
     }
