@@ -144,9 +144,9 @@ fun CatTestTab(vm: ObdViewModel) {
                 val temp = vm.currentCoolantTemp
                 val rpm = vm.currentRpm
                 
-                val tempLabel = if (vm.isCarConnected && temp != null) "${temp.toInt()}°C" else "no data"
-                val rpmLabel = if (vm.isCarConnected && rpm != null) "${rpm.toInt()}" else "no data"
-                val loopLabel = if (vm.isCarConnected) (if (vm.isClosedLoop) "Closed" else "Open") else "no data"
+                val tempLabel = if (vm.isCarConnected && temp != null) "${temp.toInt()}°C" else "---"
+                val rpmLabel = if (vm.isCarConnected && rpm != null) "${rpm.toInt()}" else "---"
+                val loopLabel = if (vm.isCarConnected) (if (vm.isClosedLoop) "Closed" else "Open") else "---"
                 val loadType = if (vm.currentLoad != null) "Load" else if (vm.currentMaf != null) "MAF" else "Load/MAF"
                 
                 PrereqItem(

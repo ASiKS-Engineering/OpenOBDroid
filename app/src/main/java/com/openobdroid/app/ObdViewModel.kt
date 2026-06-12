@@ -447,8 +447,11 @@ class ObdViewModel : ViewModel() {
         
         preMonitorJob = viewModelScope.launch(Dispatchers.IO) {
             val service = elm ?: return@launch
+            addMessage("Starting prerequisite monitoring...")
+            
             while (isActive) {
                 try {
+                    // Poll data from ECU
                     val coolantResp = service.readCoolant()
                     val rpmResp = service.readRpm()
                     val fuelResp = service.readFuelSystemStatus()
@@ -457,7 +460,7 @@ class ObdViewModel : ViewModel() {
                     val rpmValue = LiveDataParser.parse(rpmResp, "010C")
                     val statusValue = LiveDataParser.parse(fuelResp, "0103")?.toInt() ?: 0
                     
-                    // New: Automatic Load/MAF detection
+                    // Automatic Load/MAF detection for the constant load prerequisite
                     val loadResp = service.readLoad()
                     var loadValue = LiveDataParser.parse(loadResp, "0104")
                     var mafValue: Float? = null
@@ -474,7 +477,7 @@ class ObdViewModel : ViewModel() {
                         currentMaf = mafValue
                         isClosedLoop = (statusValue and 0x02) != 0
                         
-                        // Update stability buffers (last 5 samples ~5 seconds)
+                        // Update stability buffers (last 5 samples)
                         if (rpmValue != null) {
                             rpmBuffer.add(rpmValue)
                             if (rpmBuffer.size > 5) rpmBuffer.removeAt(0)
@@ -486,7 +489,7 @@ class ObdViewModel : ViewModel() {
                             if (loadBuffer.size > 5) loadBuffer.removeAt(0)
                         }
                         
-                        // Check Stability
+                        // Check Stability logic
                         if (rpmBuffer.size >= 3) {
                             val rpmRange = rpmBuffer.max() - rpmBuffer.min()
                             isRpmStable = rpmRange < 100f
@@ -497,16 +500,18 @@ class ObdViewModel : ViewModel() {
                         if (loadBuffer.size >= 3) {
                             val avgLoad = loadBuffer.average().toFloat()
                             val loadStdDev = calculateStandardDeviation(loadBuffer)
-                            // Fluctuation < 5%
+                            // Stable if fluctuation is < 5% of average
                             isLoadStable = if (avgLoad > 0) (loadStdDev / avgLoad) < 0.05f else false
                         } else {
                             isLoadStable = false
                         }
                     }
                 } catch (e: Exception) {
-                    // Ignore transient errors
+                    // Log transient errors to debug if needed
                 }
-                delay(1000) // Poll every second
+                
+                // Use a smaller delay for better responsiveness, or adjust based on loop time
+                delay(800)
             }
         }
     }

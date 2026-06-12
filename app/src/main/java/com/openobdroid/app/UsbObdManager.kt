@@ -26,7 +26,7 @@ class UsbObdManager(
 
         onDebugMessage?.invoke("D2xxManager: Opening device at index 0 with optimized parameters...")
         val params = D2xxManager.DriverParameters().apply {
-            setReadTimeout(500) // Reduce from default 5000ms to 500ms
+            setReadTimeout(100) // Reduce from default 5000ms to 100ms
         }
 
         device =
@@ -72,7 +72,7 @@ class UsbObdManager(
             System.currentTimeMillis()
 
         while (
-            (System.currentTimeMillis() - start) < 2000
+            (System.currentTimeMillis() - start) < 500 // Reduce from 2000ms to 500ms
         ) {
 
             val count =
