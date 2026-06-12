@@ -6,6 +6,7 @@ import com.ftdi.j2xx.FT_Device
 
 class UsbObdManager(
     private val context: Context,
+    private val settings: SettingsManager,
     private val onDebugMessage: ((String) -> Unit)? = null
 ) {
 
@@ -24,20 +25,20 @@ class UsbObdManager(
         if (count <= 0)
             return false
 
-        onDebugMessage?.invoke("D2xxManager: Opening device at index 0 with optimized parameters...")
+        onDebugMessage?.invoke("D2xxManager: Opening device at index 0 with parameters (Timeout: ${settings.readTimeout}ms)...")
         val params = D2xxManager.DriverParameters().apply {
-            setReadTimeout(100) // Reduce from default 5000ms to 100ms
+            setReadTimeout(settings.readTimeout)
         }
 
         device =
             manager.openByIndex(context, 0, params)
 
         device?.apply {
-            onDebugMessage?.invoke("FT_Device: Configuring baudrate 38400...")
-            setBaudRate(38400)
+            onDebugMessage?.invoke("FT_Device: Configuring baudrate ${settings.baudRate}...")
+            setBaudRate(settings.baudRate)
 
-            onDebugMessage?.invoke("FT_Device: Setting latency timer 2ms...")
-            setLatencyTimer(2)
+            onDebugMessage?.invoke("FT_Device: Setting latency timer ${settings.latencyTimer}ms...")
+            setLatencyTimer(settings.latencyTimer.toByte())
 
             setDataCharacteristics(
                 D2xxManager.FT_DATA_BITS_8,
@@ -66,13 +67,13 @@ class UsbObdManager(
     fun readUntilPrompt(): String {
 
         val result = StringBuilder()
-        val buffer = ByteArray(256)
+        val buffer = ByteArray(settings.bufferSize)
 
         val start =
             System.currentTimeMillis()
 
         while (
-            (System.currentTimeMillis() - start) < 500 // Reduce from 2000ms to 500ms
+            (System.currentTimeMillis() - start) < settings.promptTimeout
         ) {
 
             val count =

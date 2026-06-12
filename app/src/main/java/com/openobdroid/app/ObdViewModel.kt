@@ -2,14 +2,17 @@ package com.openobdroid.app
 
 import android.content.Context
 import androidx.compose.runtime.*
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import android.app.Application
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlin.math.sqrt
 
-class ObdViewModel : ViewModel() {
+class ObdViewModel(application: Application) : AndroidViewModel(application) {
+
+    val settings = SettingsManager(application)
 
     var adapterStatus by mutableStateOf("Disconnected")
     var carStatus by mutableStateOf("Disconnected")
@@ -115,7 +118,7 @@ class ObdViewModel : ViewModel() {
             var currentUsbManager = usb
             while (isActive && (System.currentTimeMillis() - scanStartTime) < scanTimeoutMs) {
                 if (currentUsbManager == null) {
-                    currentUsbManager = UsbObdManager(context) { debugMsg ->
+                    currentUsbManager = UsbObdManager(getApplication(), settings) { debugMsg ->
                         addMessage("DEBUG: $debugMsg")
                     }
                 }

@@ -3,9 +3,12 @@ package com.openobdroid.app
 import androidx.compose.animation.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
@@ -21,6 +24,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -85,8 +89,14 @@ fun ObdScreen(
                 Tab(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
-                    text = { Text("Activity Log") },
+                    text = { Text("Log") },
                     icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) }
+                )
+                Tab(
+                    selected = selectedTab == 4,
+                    onClick = { selectedTab = 4 },
+                    text = { Text("Settings") },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = null) }
                 )
             }
 
@@ -96,6 +106,7 @@ fun ObdScreen(
                     1 -> GraphTab(vm)
                     2 -> CatTestTab(vm)
                     3 -> LogTab(vm)
+                    4 -> SettingsTab(vm)
                 }
             }
         }
@@ -674,6 +685,138 @@ fun StatusIndicator(label: String, status: String, isConnected: Boolean) {
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Bold,
             color = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+fun SettingsTab(vm: ObdViewModel) {
+    val settings = vm.settings
+    
+    var baudRate by remember { mutableStateOf(settings.baudRate.toString()) }
+    var latencyTimer by remember { mutableStateOf(settings.latencyTimer.toString()) }
+    var readTimeout by remember { mutableStateOf(settings.readTimeout.toString()) }
+    var bufferSize by remember { mutableStateOf(settings.bufferSize.toString()) }
+    var promptTimeout by remember { mutableStateOf(settings.promptTimeout.toString()) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text("USB & Timing Settings", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "Changes will take effect the next time you connect to the adapter.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary
+        )
+
+        SettingsTextField(
+            label = "Baud Rate",
+            value = baudRate,
+            onValueChange = { 
+                baudRate = it
+                it.toIntOrNull()?.let { v -> settings.baudRate = v }
+            },
+            helperText = "Default: 38400 (Standard ELM327)"
+        )
+
+        SettingsTextField(
+            label = "Latency Timer (ms)",
+            value = latencyTimer,
+            onValueChange = { 
+                latencyTimer = it
+                it.toIntOrNull()?.let { v -> settings.latencyTimer = v }
+            },
+            helperText = "Default: 2 (Lower is faster, but may be unstable)"
+        )
+
+        SettingsTextField(
+            label = "Read Timeout (ms)",
+            value = readTimeout,
+            onValueChange = { 
+                readTimeout = it
+                it.toIntOrNull()?.let { v -> 
+                    settings.readTimeout = v
+                    // Sync promptTimeout UI if it was adjusted by manager
+                    promptTimeout = settings.promptTimeout.toString()
+                }
+            },
+            helperText = "Internal D2XX driver timeout. Default: 500"
+        )
+
+        SettingsTextField(
+            label = "Read Buffer Size (bytes)",
+            value = bufferSize,
+            onValueChange = { 
+                bufferSize = it
+                it.toIntOrNull()?.let { v -> settings.bufferSize = v }
+            },
+            helperText = "Default: 256"
+        )
+
+        SettingsTextField(
+            label = "Prompt Wait Timeout (ms)",
+            value = promptTimeout,
+            onValueChange = { 
+                promptTimeout = it
+                it.toLongOrNull()?.let { v -> 
+                    settings.promptTimeout = v
+                    // Sync UI back if the manager clamped the value
+                    if (v < settings.readTimeout + 100) {
+                        promptTimeout = settings.promptTimeout.toString()
+                    }
+                }
+            },
+            helperText = "Must be > Read Timeout. Default: 600"
+        )
+        
+        Spacer(Modifier.height(16.dp))
+        
+        OutlinedButton(
+            onClick = {
+                settings.baudRate = 38400
+                settings.latencyTimer = 2
+                settings.readTimeout = 500
+                settings.bufferSize = 256
+                settings.promptTimeout = 600L
+                
+                baudRate = "38400"
+                latencyTimer = "2"
+                readTimeout = "500"
+                bufferSize = "256"
+                promptTimeout = "600"
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Reset to Defaults")
+        }
+    }
+}
+
+@Composable
+fun SettingsTextField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    helperText: String
+) {
+    Column {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = { Text(label) },
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true
+        )
+        Text(
+            text = helperText,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
         )
     }
 }
