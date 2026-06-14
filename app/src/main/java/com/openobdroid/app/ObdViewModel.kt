@@ -5,14 +5,21 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import android.app.Application
+import androidx.core.content.FileProvider
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import java.io.File
+import java.io.FileWriter
+import java.text.SimpleDateFormat
+import java.util.*
 import kotlin.math.sqrt
 
 class ObdViewModel(application: Application) : AndroidViewModel(application) {
 
     val settings = SettingsManager(application)
+    private val db = AppDatabase.getDatabase(application)
+    private val recordingDao = db.recordingDao()
 
     var adapterStatus by mutableStateOf("Disconnected")
     var carStatus by mutableStateOf("Disconnected")
@@ -23,6 +30,7 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
 
     sealed class ObdEvent {
         object CloseApp : ObdEvent()
+        data class ShareFile(val file: File) : ObdEvent()
     }
 
     // UI state properties
@@ -113,6 +121,103 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
 
     private var catTestJob: Job? = null
     private var preMonitorJob: Job? = null
+
+    // Recording state
+    var isRecording by mutableStateOf(false)
+    private var currentSessionId: Long? = null
+    private var recordingJob: Job? = null
+    val sessions = recordingDao.getAllSessions()
+
+    fun startRecording() {
+        if (isRecording || elm == null) return
+        isRecording = true
+        addMessage("Recording started.")
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            val startTime = System.currentTimeMillis()
+            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+            val name = "Log ${sdf.format(Date(startTime))}"
+            
+            currentSessionId = recordingDao.insertSession(
+                RecordingSession(startTime = startTime, name = name)
+            )
+            
+            recordingJob = launch {
+                while (isActive && isRecording) {
+                    val sessionId = currentSessionId ?: break
+                    val dataPoints = mutableListOf<SensorDataPoint>()
+                    val timestamp = System.currentTimeMillis()
+                    
+                    // Poll all supported sensors that we have names for
+                    for (pid in supportedPids) {
+                        if (pidNames.containsKey(pid)) {
+                            val response = elm?.runCommandDirect("01$pid")
+                            val value = LiveDataParser.parse(response ?: "", "01$pid")
+                            if (value != null) {
+                                dataPoints.add(
+                                    SensorDataPoint(
+                                        sessionId = sessionId,
+                                        timestamp = timestamp,
+                                        pid = pid,
+                                        name = pidNames[pid] ?: pid,
+                                        value = value
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    
+                    if (dataPoints.isNotEmpty()) {
+                        recordingDao.insertDataPoints(dataPoints)
+                    }
+                    
+                    delay(1000) // 1Hz recording rate
+                }
+            }
+        }
+    }
+
+    fun stopRecording() {
+        if (!isRecording) return
+        isRecording = false
+        recordingJob?.cancel()
+        recordingJob = null
+        addMessage("Recording stopped.")
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            val sessionId = currentSessionId ?: return@launch
+            val session = recordingDao.getSessionById(sessionId)
+            if (session != null) {
+                recordingDao.updateSession(session.copy(endTime = System.currentTimeMillis()))
+            }
+        }
+    }
+
+    fun deleteSession(session: RecordingSession) {
+        viewModelScope.launch(Dispatchers.IO) {
+            recordingDao.deleteSession(session)
+        }
+    }
+
+    fun shareSession(session: RecordingSession) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val data = recordingDao.getDataForSession(session.id)
+            if (data.isEmpty()) return@launch
+
+            val csvFile = File(getApplication<Application>().cacheDir, "${session.name.replace(" ", "_")}.csv")
+            try {
+                FileWriter(csvFile).use { writer ->
+                    writer.write("Timestamp,TimeDelta(ms),PID,Name,Value\n")
+                    data.forEach { point ->
+                        writer.write("${point.timestamp},${point.timestamp - session.startTime},${point.pid},${point.name},${point.value}\n")
+                    }
+                }
+                _events.emit(ObdEvent.ShareFile(csvFile))
+            } catch (e: Exception) {
+                addMessage("Error exporting data: ${e.message}")
+            }
+        }
+    }
 
     private var usb: UsbObdManager? = null
     private var elm: Elm327Service? = null

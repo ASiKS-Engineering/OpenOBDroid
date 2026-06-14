@@ -10,6 +10,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
     // Compose Compiler plugin for Kotlin 2.0+
     id("org.jetbrains.kotlin.plugin.compose")
+    // KSP for Room
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -99,6 +101,12 @@ dependencies {
     // Kotlin Coroutines for async operations
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
+
+    // Room Database
+    val room_version = "2.7.0-alpha11"
+    implementation("androidx.room:room-runtime:$room_version")
+    implementation("androidx.room:room-ktx:$room_version")
+    ksp("androidx.room:room-compiler:$room_version")
 
     /**
      * Local library dependency for FTDI D2XX driver.

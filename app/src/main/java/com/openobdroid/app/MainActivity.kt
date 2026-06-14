@@ -9,8 +9,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.LaunchedEffect
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.collectLatest
+import java.io.File
 
 class MainActivity : ComponentActivity() {
 
@@ -40,12 +42,23 @@ class MainActivity : ComponentActivity() {
                 viewModel.events.collectLatest { event ->
                     when (event) {
                         is ObdViewModel.ObdEvent.CloseApp -> finish()
+                        is ObdViewModel.ObdEvent.ShareFile -> shareFile(event.file)
                     }
                 }
             }
 
             ObdScreen(viewModel)
         }
+    }
+
+    private fun shareFile(file: File) {
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Share Recording"))
     }
 
     override fun onDestroy() {

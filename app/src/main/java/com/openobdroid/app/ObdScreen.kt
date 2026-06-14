@@ -133,11 +133,26 @@ fun ObdScreen(
                 Tab(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
-                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Log") }
+                    icon = {
+                        BadgedBox(
+                            badge = {
+                                if (vm.isRecording) {
+                                    Badge(containerColor = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.RadioButtonChecked, contentDescription = "Record")
+                        }
+                    }
                 )
                 Tab(
                     selected = selectedTab == 4,
                     onClick = { selectedTab = 4 },
+                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Log") }
+                )
+                Tab(
+                    selected = selectedTab == 5,
+                    onClick = { selectedTab = 5 },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") }
                 )
             }
@@ -147,8 +162,9 @@ fun ObdScreen(
                     0 -> DashboardTab(vm, context)
                     1 -> GraphTab(vm)
                     2 -> CatTestTab(vm)
-                    3 -> LogTab(vm)
-                    4 -> SettingsTab(vm)
+                    3 -> RecordingsTab(vm)
+                    4 -> LogTab(vm)
+                    5 -> SettingsTab(vm)
                 }
             }
         }
@@ -960,6 +976,108 @@ fun LogTab(vm: ObdViewModel) {
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun RecordingsTab(vm: ObdViewModel) {
+    val sessions by vm.sessions.collectAsState(initial = emptyList())
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Sensor Data Recording", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Record all supported sensor data to a local database.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(16.dp))
+
+                Button(
+                    onClick = {
+                        if (vm.isRecording) vm.stopRecording() else vm.startRecording()
+                    },
+                    enabled = vm.isCarConnected,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = if (vm.isRecording) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                             else ButtonDefaults.buttonColors()
+                ) {
+                    Icon(if (vm.isRecording) Icons.Default.Stop else Icons.Default.RadioButtonChecked, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (vm.isRecording) "Stop Recording" else "Start Recording")
+                }
+            }
+        }
+
+        Text("Saved Recordings", style = MaterialTheme.typography.titleMedium)
+
+        if (sessions.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No recordings found.", style = MaterialTheme.typography.bodyMedium)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(sessions) { session ->
+                    SessionItem(
+                        session = session,
+                        onShare = { vm.shareSession(session) },
+                        onDelete = { vm.deleteSession(session) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SessionItem(
+    session: RecordingSession,
+    onShare: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(session.name, style = MaterialTheme.typography.titleSmall)
+                val duration = if (session.endTime != null) {
+                    val diff = session.endTime - session.startTime
+                    "${diff / 1000}s"
+                } else {
+                    "In progress..."
+                }
+                Text("Duration: $duration", style = MaterialTheme.typography.labelSmall)
+            }
+            
+            Row {
+                IconButton(onClick = onShare) {
+                    Icon(Icons.Default.Share, contentDescription = "Share")
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }
