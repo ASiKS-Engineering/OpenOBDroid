@@ -322,10 +322,8 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
             for (i in 1..3) {
                 addMessage("ECU check attempt $i of 3...")
                 val response = service.readRpm()
-                if (response.isNotBlank() && 
-                    !response.contains("UNABLE", ignoreCase = true) && 
-                    !response.contains("NO DATA", ignoreCase = true) &&
-                    !response.contains("?", ignoreCase = true)) {
+                // Use LiveDataParser to verify we got a valid RPM response (header 41 0C + data)
+                if (LiveDataParser.parse(response, "010C") != null) {
                     carFound = true
                     break
                 }

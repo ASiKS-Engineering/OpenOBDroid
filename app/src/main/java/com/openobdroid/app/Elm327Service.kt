@@ -21,8 +21,11 @@ class Elm327Service(
             onDebugMessage?.invoke("Reset complete: ELM327 ID: $retryId")
         }
         
-        // Grouping common setup commands
-        send("ATE0 L0 H0 S0") 
+        // Common setup commands
+        send("ATE0") 
+        send("ATL0")
+        send("ATH0")
+        send("ATS0")
         onDebugMessage?.invoke("Configured: Echo, Linefeeds, Headers, Spaces OFF")
         
         send("ATSP0")

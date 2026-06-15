@@ -113,4 +113,7 @@ dependencies {
      * Ensure the d2xx.jar file is present in the 'libs' directory.
      */
     implementation(files("libs/d2xx.jar"))
+
+    // USB Serial for Android (for LIN bus communication)
+    implementation("com.github.mik3y:usb-serial-for-android:3.10.0")
 }
