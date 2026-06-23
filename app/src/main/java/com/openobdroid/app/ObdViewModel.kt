@@ -86,42 +86,6 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     private var graphingJob: Job? = null
     private var connectionJob: Job? = null
 
-    // Catalyst Test state
-    var isCatTestRunning by mutableStateOf(false)
-    var catTestStatus by mutableStateOf("Not started")
-    var catTestResult by mutableStateOf<String?>(null)
-    var catTestProgress by mutableStateOf(0f)
-    var catTestRemainingSeconds by mutableStateOf(0)
-    var wasPrereqViolated by mutableStateOf(false)
-    var lastViolationMessage by mutableStateOf<String?>(null)
-    
-    // Pre-condition monitoring state
-    var isPreMonitorRunning by mutableStateOf(false)
-    var currentCoolantTemp by mutableStateOf<Float?>(null)
-    var currentRpm by mutableStateOf<Float?>(null)
-    var currentLoad by mutableStateOf<Float?>(null)
-    var currentMaf by mutableStateOf<Float?>(null)
-    var isClosedLoop by mutableStateOf(false)
-    
-    // Stability indicators
-    var isRpmStable by mutableStateOf(false)
-    var isLoadStable by mutableStateOf(false)
-    
-    private val rpmBuffer = mutableListOf<Float>()
-    private val loadBuffer = mutableListOf<Float>()
-    
-    val canStartCatTest by derivedStateOf {
-        isCarConnected && 
-        (currentCoolantTemp ?: 0f) >= 80f && 
-        (currentRpm ?: 0f) in 2000f..3000f && 
-        isClosedLoop && 
-        isRpmStable && 
-        isLoadStable
-    }
-
-    private var catTestJob: Job? = null
-    private var preMonitorJob: Job? = null
-
     // Recording state
     var isRecording by mutableStateOf(false)
     private var currentSessionId: Long? = null
@@ -131,15 +95,20 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     fun startRecording() {
         if (isRecording || elm == null) return
         isRecording = true
-        addMessage("Recording started.")
+        addMessage("Recording started. Reading DTCs...")
         
         viewModelScope.launch(Dispatchers.IO) {
             val startTime = System.currentTimeMillis()
             val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
             val name = "Log ${sdf.format(Date(startTime))}"
             
+            // Read DTCs at start
+            val dtcData = elm?.readDtc()
+            val dtcsStart = if (dtcData != null) DtcParser.parse(dtcData).joinToString(",") else null
+            if (dtcsStart != null && dtcsStart.isNotEmpty()) addMessage("DTCs at start: $dtcsStart")
+            
             currentSessionId = recordingDao.insertSession(
-                RecordingSession(startTime = startTime, name = name)
+                RecordingSession(startTime = startTime, name = name, dtcsAtStart = dtcsStart)
             )
             
             recordingJob = launch {
@@ -171,7 +140,7 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
                         recordingDao.insertDataPoints(dataPoints)
                     }
                     
-                    delay(1000) // 1Hz recording rate
+                    delay(settings.recordingIntervalMs.toLong())
                 }
             }
         }
@@ -182,13 +151,22 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
         isRecording = false
         recordingJob?.cancel()
         recordingJob = null
-        addMessage("Recording stopped.")
+        addMessage("Recording stopped. Reading DTCs...")
         
         viewModelScope.launch(Dispatchers.IO) {
             val sessionId = currentSessionId ?: return@launch
+            
+            // Read DTCs at end
+            val dtcData = elm?.readDtc()
+            val dtcsEnd = if (dtcData != null) DtcParser.parse(dtcData).joinToString(",") else null
+            if (dtcsEnd != null && dtcsEnd.isNotEmpty()) addMessage("DTCs at end: $dtcsEnd")
+
             val session = recordingDao.getSessionById(sessionId)
             if (session != null) {
-                recordingDao.updateSession(session.copy(endTime = System.currentTimeMillis()))
+                recordingDao.updateSession(session.copy(
+                    endTime = System.currentTimeMillis(),
+                    dtcsAtEnd = dtcsEnd
+                ))
             }
         }
     }
@@ -207,6 +185,8 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
             val csvFile = File(getApplication<Application>().cacheDir, "${session.name.replace(" ", "_")}.csv")
             try {
                 FileWriter(csvFile).use { writer ->
+                    if (session.dtcsAtStart != null) writer.write("# DTCs at start: ${session.dtcsAtStart}\n")
+                    if (session.dtcsAtEnd != null) writer.write("# DTCs at end: ${session.dtcsAtEnd}\n")
                     writer.write("Timestamp,TimeDelta(ms),PID,Name,Value\n")
                     data.forEach { point ->
                         writer.write("${point.timestamp},${point.timestamp - session.startTime},${point.pid},${point.name},${point.value}\n")
@@ -355,13 +335,7 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cleanup() {
         stopGraphing()
-        stopCatTest()
-        stopPreMonitor()
         
-        currentCoolantTemp = null
-        currentRpm = null
-        isClosedLoop = false
-
         usb?.close()
         usb = null
         elm = null
@@ -370,7 +344,6 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun disconnect() {
-        stopPreMonitor()
         stopGraphing()
         cleanup()
         addMessage("Disconnected.")
@@ -461,229 +434,6 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
         isGraphing = false
         graphingJob?.cancel()
         graphingJob = null
-    }
-
-    fun startCatTest() {
-        val service = elm ?: return
-        if (isCatTestRunning) return
-        
-        isCatTestRunning = true
-        catTestResult = null
-        catTestProgress = 0f
-        catTestRemainingSeconds = 30
-        wasPrereqViolated = false
-        lastViolationMessage = null
-        
-        catTestJob = viewModelScope.launch(Dispatchers.IO) {
-            val s1Data = mutableListOf<Float>()
-            val s2Data = mutableListOf<Float>()
-            val totalSamples = 150 // 30 seconds at 5Hz
-            val startTime = System.currentTimeMillis()
-            val durationMs = 30000L
-            
-            while (isActive && isCatTestRunning) {
-                val elapsed = System.currentTimeMillis() - startTime
-                if (elapsed >= durationMs) break
-
-                // Check prerequisites
-                val temp = currentCoolantTemp ?: 0f
-                val rpm = currentRpm ?: 0f
-                
-                val isTempOk = temp >= 80f
-                val isRpmOk = rpm in 2000f..3000f
-                val isLoopOk = isClosedLoop
-                
-                if (!isTempOk || !isRpmOk || !isLoopOk) {
-                    wasPrereqViolated = true
-                    val reason = buildString {
-                        if (!isTempOk) append("Temp low. ")
-                        if (!isRpmOk) append("RPM out of range. ")
-                        if (!isLoopOk) append("Open Loop. ")
-                    }
-                    withContext(Dispatchers.Main) {
-                        lastViolationMessage = "Warning: $reason"
-                    }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        lastViolationMessage = null
-                    }
-                }
-                
-                // Collect data regardless of violations (per requirement)
-                val s1 = LiveDataParser.parse(service.readO2VoltageB1S1(), "0114")
-                val s2 = LiveDataParser.parse(service.readO2VoltageB1S2(), "0115")
-                
-                if (s1 != null && s2 != null) {
-                    s1Data.add(s1)
-                    s2Data.add(s2)
-                    // Overwrite old data once buffer is full (sliding window)
-                    if (s1Data.size > totalSamples) {
-                        s1Data.removeAt(0)
-                        s2Data.removeAt(0)
-                    }
-                }
-
-                withContext(Dispatchers.Main) {
-                    catTestProgress = (elapsed.toFloat() / durationMs).coerceIn(0f, 1f)
-                    catTestRemainingSeconds = (30 - (elapsed / 1000)).toInt().coerceAtLeast(0)
-                    catTestStatus = "Running Test... ${catTestRemainingSeconds}s left"
-                }
-                
-                delay(200) // 5Hz sampling
-            }
-            
-            if (s1Data.size >= 50) { // Require at least some data to calculate
-                val corr = calculateCorrelation(s1Data, s2Data)
-                val stdS1 = calculateStandardDeviation(s1Data)
-                val stdS2 = calculateStandardDeviation(s2Data)
-                
-                val damping = if (stdS1 > 0) (1f - (stdS2 / stdS1)).coerceIn(0f, 1f) else 0f
-                val invCorr = (1f - corr).coerceIn(0f, 1f)
-                
-                val efficiency = (0.5f * invCorr) + (0.5f * damping)
-                val efficiencyPct = (efficiency * 100).toInt()
-                
-                withContext(Dispatchers.Main) {
-                    isCatTestRunning = false
-                    catTestProgress = 1f
-                    catTestStatus = "Test Complete"
-                    val baseResult = when {
-                        efficiencyPct >= 75 -> "SUCCESS ($efficiencyPct%)"
-                        efficiencyPct >= 50 -> "BORDERLINE ($efficiencyPct%)"
-                        else -> "FAILED ($efficiencyPct%)"
-                    }
-                    
-                    catTestResult = if (wasPrereqViolated) {
-                        "Result: $baseResult. (Warning: Prerequisites were violated during test, result might be inaccurate)."
-                    } else {
-                        "Result: $baseResult. Catalyst is healthy."
-                    }
-                    addMessage("Catalyst Test: $catTestResult")
-                    lastViolationMessage = null
-                }
-            } else {
-                withContext(Dispatchers.Main) {
-                    isCatTestRunning = false
-                    catTestStatus = "Test Failed: Insufficient Data"
-                }
-            }
-        }
-    }
-
-    fun stopCatTest() {
-        isCatTestRunning = false
-        catTestJob?.cancel()
-        catTestJob = null
-        catTestStatus = "Stopped"
-        
-        // Clear all calculations when stopped
-        catTestResult = null
-        catTestProgress = 0f
-        catTestRemainingSeconds = 0
-        wasPrereqViolated = false
-        lastViolationMessage = null
-    }
-
-    fun startPreMonitor() {
-        if (preMonitorJob != null || elm == null) return
-        
-        isPreMonitorRunning = true
-        preMonitorJob = viewModelScope.launch(Dispatchers.IO) {
-            val service = elm ?: return@launch
-            addMessage("Starting prerequisite monitoring...")
-            
-            while (isActive) {
-                try {
-                    // Poll data from ECU
-                    val coolantResp = service.readCoolant()
-                    val rpmResp = service.readRpm()
-                    val fuelResp = service.readFuelSystemStatus()
-                    
-                    val temp = LiveDataParser.parse(coolantResp, "0105")
-                    val rpmValue = LiveDataParser.parse(rpmResp, "010C")
-                    val statusValue = LiveDataParser.parse(fuelResp, "0103")?.toInt() ?: 0
-                    
-                    // Automatic Load/MAF detection for the constant load prerequisite
-                    val loadResp = service.readLoad()
-                    var loadValue = LiveDataParser.parse(loadResp, "0104")
-                    var mafValue: Float? = null
-                    
-                    if (loadValue == null) {
-                        val mafResp = service.readMAF()
-                        mafValue = LiveDataParser.parse(mafResp, "0110")
-                    }
-                    
-                    withContext(Dispatchers.Main) {
-                        currentCoolantTemp = temp
-                        currentRpm = rpmValue
-                        currentLoad = loadValue
-                        currentMaf = mafValue
-                        isClosedLoop = (statusValue and 0x02) != 0
-                        
-                        // Update stability buffers (last 5 samples)
-                        if (rpmValue != null) {
-                            rpmBuffer.add(rpmValue)
-                            if (rpmBuffer.size > 5) rpmBuffer.removeAt(0)
-                        }
-                        
-                        val activeLoadValue = loadValue ?: mafValue
-                        if (activeLoadValue != null) {
-                            loadBuffer.add(activeLoadValue)
-                            if (loadBuffer.size > 5) loadBuffer.removeAt(0)
-                        }
-                        
-                        // Check Stability logic
-                        if (rpmBuffer.size >= 3) {
-                            val rpmRange = rpmBuffer.max() - rpmBuffer.min()
-                            isRpmStable = rpmRange < 100f
-                        } else {
-                            isRpmStable = false
-                        }
-                        
-                        if (loadBuffer.size >= 3) {
-                            val avgLoad = loadBuffer.average().toFloat()
-                            val loadStdDev = calculateStandardDeviation(loadBuffer)
-                            // Stable if fluctuation is < 5% of average
-                            isLoadStable = if (avgLoad > 0) (loadStdDev / avgLoad) < 0.05f else false
-                        } else {
-                            isLoadStable = false
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Log transient errors to debug if needed
-                }
-                
-                // Use a smaller delay for better responsiveness, or adjust based on loop time
-                delay(800)
-            }
-        }
-    }
-
-    fun stopPreMonitor() {
-        isPreMonitorRunning = false
-        preMonitorJob?.cancel()
-        preMonitorJob = null
-    }
-
-    private fun calculateCorrelation(x: List<Float>, y: List<Float>): Float {
-        if (x.size != y.size || x.isEmpty()) return 0f
-        val n = x.size
-        val sumX = x.sum()
-        val sumY = y.sum()
-        val sumXY = x.zip(y).sumOf { (it.first * it.second).toDouble() }.toFloat()
-        val sumX2 = x.sumOf { (it * it).toDouble() }.toFloat()
-        val sumY2 = y.sumOf { (it * it).toDouble() }.toFloat()
-        
-        val numerator = n * sumXY - sumX * sumY
-        val denominator = sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY))
-        return if (denominator == 0f) 0f else numerator / denominator
-    }
-
-    private fun calculateStandardDeviation(data: List<Float>): Float {
-        if (data.isEmpty()) return 0f
-        val mean = data.average().toFloat()
-        val variance = data.map { (it - mean) * (it - mean) }.average().toFloat()
-        return sqrt(variance)
     }
 
     fun runCommand(commandName: String) {

@@ -34,4 +34,8 @@ class SettingsManager(context: Context) {
             val validatedValue = if (value < readTimeout + 100) (readTimeout + 100).toLong() else value
             prefs.edit().putLong("prompt_timeout", validatedValue).apply()
         }
+
+    var recordingIntervalMs: Int
+        get() = prefs.getInt("recording_interval_ms", 1000)
+        set(value) = prefs.edit().putInt("recording_interval_ms", value).apply()
 }

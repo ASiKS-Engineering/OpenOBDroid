@@ -8,7 +8,9 @@ data class RecordingSession(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val startTime: Long,
     val endTime: Long? = null,
-    val name: String
+    val name: String,
+    val dtcsAtStart: String? = null,
+    val dtcsAtEnd: String? = null
 )
 
 @Entity(
@@ -56,7 +58,7 @@ interface RecordingDao {
     suspend fun deleteSession(session: RecordingSession)
 }
 
-@Database(entities = [RecordingSession::class, SensorDataPoint::class], version = 1, exportSchema = false)
+@Database(entities = [RecordingSession::class, SensorDataPoint::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun recordingDao(): RecordingDao
 
@@ -70,7 +72,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "obd_recordings.db"
-                ).build()
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }

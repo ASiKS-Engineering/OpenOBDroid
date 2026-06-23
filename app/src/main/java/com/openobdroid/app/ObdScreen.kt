@@ -119,23 +119,6 @@ fun ObdScreen(
                     icon = {
                         BadgedBox(
                             badge = {
-                                if (vm.isCatTestRunning || vm.isPreMonitorRunning) {
-                                    Badge(
-                                        containerColor = if (vm.isCatTestRunning) MaterialTheme.colorScheme.error else Color(0xFF4CAF50)
-                                    )
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Default.Science, contentDescription = "Cat Test")
-                        }
-                    }
-                )
-                Tab(
-                    selected = selectedTab == 3,
-                    onClick = { selectedTab = 3 },
-                    icon = {
-                        BadgedBox(
-                            badge = {
                                 if (vm.isRecording) {
                                     Badge(containerColor = MaterialTheme.colorScheme.error)
                                 }
@@ -146,13 +129,13 @@ fun ObdScreen(
                     }
                 )
                 Tab(
-                    selected = selectedTab == 4,
-                    onClick = { selectedTab = 4 },
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
                     icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Log") }
                 )
                 Tab(
-                    selected = selectedTab == 5,
-                    onClick = { selectedTab = 5 },
+                    selected = selectedTab == 4,
+                    onClick = { selectedTab = 4 },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") }
                 )
             }
@@ -161,215 +144,12 @@ fun ObdScreen(
                 when (tabIndex) {
                     0 -> DashboardTab(vm, context)
                     1 -> GraphTab(vm)
-                    2 -> CatTestTab(vm)
-                    3 -> RecordingsTab(vm)
-                    4 -> LogTab(vm)
-                    5 -> SettingsTab(vm)
+                    2 -> RecordingsTab(vm)
+                    3 -> LogTab(vm)
+                    4 -> SettingsTab(vm)
                 }
             }
         }
-    }
-}
-
-@Composable
-fun CatTestTab(vm: ObdViewModel) {
-    LaunchedEffect(vm.isCarConnected) {
-        if (vm.isCarConnected) {
-            vm.startPreMonitor()
-        } else {
-            vm.stopPreMonitor()
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            vm.stopPreMonitor()
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("Catalysator Performance Test", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "This test checks the correlation between pre-cat and post-cat O2 sensors.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-        }
-
-        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Prerequisites Status:", style = MaterialTheme.typography.titleSmall)
-                    if (vm.isPreMonitorRunning || vm.isCatTestRunning) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            val dotColor = if (vm.isCatTestRunning) MaterialTheme.colorScheme.error else Color(0xFF4CAF50)
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(dotColor)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                text = if (vm.isCatTestRunning) "TESTING" else "LIVE",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = dotColor,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                
-                val temp = vm.currentCoolantTemp
-                val rpm = vm.currentRpm
-                
-                val tempLabel = if (vm.isCarConnected && temp != null) "${temp.toInt()}°C" else "---"
-                val rpmLabel = if (vm.isCarConnected && rpm != null) "${rpm.toInt()}" else "---"
-                val loopLabel = if (vm.isCarConnected) (if (vm.isClosedLoop) "Closed" else "Open") else "---"
-                val loadType = if (vm.currentLoad != null) "Load" else if (vm.currentMaf != null) "MAF" else "Load/MAF"
-                
-                PrereqItem(
-                    label = "Coolant Temp >= 80°C ($tempLabel)",
-                    isMet = vm.isCarConnected && temp != null && temp >= 80f
-                )
-                PrereqItem(
-                    label = "RPM: 2000 - 3000 ($rpmLabel)",
-                    isMet = vm.isCarConnected && rpm != null && rpm in 2000f..3000f
-                )
-                PrereqItem(
-                    label = "Fuel System: Closed Loop ($loopLabel)",
-                    isMet = vm.isCarConnected && vm.isClosedLoop
-                )
-                PrereqItem(
-                    label = "RPM Stability (< 100 fluctuation)",
-                    isMet = vm.isCarConnected && vm.isRpmStable
-                )
-                PrereqItem(
-                    label = "Constant $loadType (< 5% fluctuation)",
-                    isMet = vm.isCarConnected && vm.isLoadStable
-                )
-            }
-        }
-
-        ElevatedCard(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.elevatedCardColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer
-            )
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text("Test Status", style = MaterialTheme.typography.labelLarge)
-                Text(
-                    text = vm.catTestStatus,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
-                
-                if (vm.lastViolationMessage != null) {
-                    Text(
-                        text = vm.lastViolationMessage ?: "",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    )
-                }
-                
-                LinearProgressIndicator(
-                    progress = { vm.catTestProgress },
-                    modifier = Modifier.fillMaxWidth().clip(CircleShape).height(8.dp)
-                )
-                
-                Spacer(Modifier.height(16.dp))
-
-                Button(
-                    onClick = {
-                        if (vm.isCatTestRunning) vm.stopCatTest() else vm.startCatTest()
-                    },
-                    enabled = vm.canStartCatTest || vm.isCatTestRunning,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = if (vm.isCatTestRunning) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                             else ButtonDefaults.buttonColors()
-                ) {
-                    Icon(if (vm.isCatTestRunning) Icons.Default.Stop else Icons.Default.PlayArrow, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (vm.isCatTestRunning) "Stop Test" else "Start Catalyst Test")
-                }
-            }
-        }
-
-        if (vm.catTestResult != null) {
-            val isSuccess = vm.catTestResult?.contains("SUCCESS") == true
-            val isWorn = vm.catTestResult?.contains("FAILED") == true
-            
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = when {
-                        isSuccess -> Color(0xFFE8F5E9)
-                        isWorn -> Color(0xFFFFEBEE)
-                        else -> Color(0xFFFFF3E0)
-                    }
-                )
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        "Test Result",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = when {
-                            isSuccess -> Color(0xFF2E7D32)
-                            isWorn -> Color(0xFFC62828)
-                            else -> Color(0xFFEF6C00)
-                        }
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = vm.catTestResult ?: "",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun PrereqItem(label: String, isMet: Boolean) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(vertical = 4.dp)
-    ) {
-        Icon(
-            imageVector = if (isMet) Icons.Default.CheckCircle else Icons.Default.Cancel,
-            contentDescription = null,
-            tint = if (isMet) Color(0xFF4CAF50) else Color(0xFFF44336),
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(Modifier.width(12.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (isMet) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error
-        )
     }
 }
 
@@ -785,6 +565,7 @@ fun SettingsTab(vm: ObdViewModel) {
     var readTimeout by remember { mutableStateOf(settings.readTimeout.toString()) }
     var bufferSize by remember { mutableStateOf(settings.bufferSize.toString()) }
     var promptTimeout by remember { mutableStateOf(settings.promptTimeout.toString()) }
+    var recordingInterval by remember { mutableStateOf(settings.recordingIntervalMs.toFloat()) }
 
     Column(
         modifier = Modifier
@@ -859,6 +640,17 @@ fun SettingsTab(vm: ObdViewModel) {
             },
             helperText = "Must be > Read Timeout. Default: 600"
         )
+
+        Text("Recording Interval: ${recordingInterval.toInt()} ms", style = MaterialTheme.typography.bodyMedium)
+        Slider(
+            value = recordingInterval,
+            onValueChange = { 
+                recordingInterval = it
+                settings.recordingIntervalMs = it.toInt()
+            },
+            valueRange = 10f..1000f,
+            steps = 98
+        )
         
         Spacer(Modifier.height(16.dp))
         
@@ -869,12 +661,14 @@ fun SettingsTab(vm: ObdViewModel) {
                 settings.readTimeout = 500
                 settings.bufferSize = 256
                 settings.promptTimeout = 600L
+                settings.recordingIntervalMs = 1000
                 
                 baudRate = "38400"
                 latencyTimer = "2"
                 readTimeout = "500"
                 bufferSize = "256"
                 promptTimeout = "600"
+                recordingInterval = 1000f
             },
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -984,6 +778,7 @@ fun LogTab(vm: ObdViewModel) {
 @Composable
 fun RecordingsTab(vm: ObdViewModel) {
     val sessions by vm.sessions.collectAsState(initial = emptyList())
+    var intervalMs by remember { mutableStateOf(vm.settings.recordingIntervalMs.toFloat()) }
 
     Column(
         modifier = Modifier
@@ -999,9 +794,32 @@ fun RecordingsTab(vm: ObdViewModel) {
             ) {
                 Text("Sensor Data Recording", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
+                
+                // Interval Setting
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Interval: ${intervalMs.toInt()} ms", style = MaterialTheme.typography.bodyMedium)
+                        Slider(
+                            value = intervalMs,
+                            onValueChange = { 
+                                intervalMs = it
+                                vm.settings.recordingIntervalMs = it.toInt()
+                            },
+                            valueRange = 10f..1000f,
+                            steps = 98, // (1000-10)/10 = 99 intervals, so 98 steps for 10ms increments
+                            enabled = !vm.isRecording
+                        )
+                    }
+                }
+                
                 Text(
-                    "Record all supported sensor data to a local database.",
-                    style = MaterialTheme.typography.bodySmall
+                    "Note: Fast intervals (<100ms) may be limited by adapter and car protocol speed.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary
                 )
                 Spacer(Modifier.height(16.dp))
 
@@ -1069,6 +887,12 @@ fun SessionItem(
                     "In progress..."
                 }
                 Text("Duration: $duration", style = MaterialTheme.typography.labelSmall)
+                if (!session.dtcsAtStart.isNullOrBlank()) {
+                    Text("DTC Start: ${session.dtcsAtStart}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                }
+                if (!session.dtcsAtEnd.isNullOrBlank()) {
+                    Text("DTC End: ${session.dtcsAtEnd}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                }
             }
             
             Row {
