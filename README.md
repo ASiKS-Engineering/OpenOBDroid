@@ -32,11 +32,32 @@ OpenOBDroid is an Android application designed for vehicle diagnostics via OBD-I
 
 ## Development Setup
 
-1. Clone the repository.
-2. Ensure you have the latest Android Studio installed.
-3. The project uses the JitPack repository for certain dependencies, which is configured in `settings.gradle.kts`.
-4. Build and deploy to an Android device (API Level 26+ recommended).
+1. Clone the repository: `git clone https://github.com/your-repo/OpenOBDroid.git`
+2. Ensure you have the latest **Android Studio** installed.
+3. The project uses the **JitPack** repository for certain dependencies, which is already configured in `settings.gradle.kts`.
+4. Ensure the `libs/d2xx.jar` file is present in the `app/libs/` directory for FTDI support. You can download the FTDI D2XX library for Android from [here](https://ftdichip.com/software-examples/android-java-d2xx/).
+
+## Build Instructions
+
+### Using Android Studio
+1. Open the project in Android Studio.
+2. Wait for Gradle Sync to complete.
+3. Click the **Run** button or use `Shift + F10` to build and deploy to a connected device.
+
+### Using Command Line (Gradle)
+To build the debug APK, run the following command in the project root:
+
+```bash
+# Windows
+.\gradlew assembleDebug
+
+# macOS/Linux
+./gradlew assembleDebug
+```
+
+The generated APK will be located at:
+`app/build/outputs/apk/debug/app-debug.apk`
 
 ## License
 
-This project is developed by ASiKS-Engineering.
+This project is open source and available under the [MIT License](LICENSE).
