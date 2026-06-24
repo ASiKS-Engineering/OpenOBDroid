@@ -783,7 +783,8 @@ fun RecordingsTab(vm: ObdViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -802,7 +803,7 @@ fun RecordingsTab(vm: ObdViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Interval: ${intervalMs.toInt()} ms", style = MaterialTheme.typography.bodyMedium)
+                        Text("Target Interval: ${intervalMs.toInt()} ms", style = MaterialTheme.typography.bodyMedium)
                         Slider(
                             value = intervalMs,
                             onValueChange = { 
@@ -810,14 +811,24 @@ fun RecordingsTab(vm: ObdViewModel) {
                                 vm.settings.recordingIntervalMs = it.toInt()
                             },
                             valueRange = 10f..1000f,
-                            steps = 98, // (1000-10)/10 = 99 intervals, so 98 steps for 10ms increments
+                            steps = 98,
                             enabled = !vm.isRecording
                         )
+                        
+                        if (vm.isRecording) {
+                            Text(
+                                "Achieved Cycle: ${vm.actualRecordingIntervalMs} ms",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (vm.actualRecordingIntervalMs > vm.settings.recordingIntervalMs + 50) 
+                                        MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
                 
                 Text(
-                    "Note: Fast intervals (<100ms) may be limited by adapter and car protocol speed.",
+                    "Note: Cycle time depends on the number of selected PIDs.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.secondary
                 )
@@ -839,24 +850,78 @@ fun RecordingsTab(vm: ObdViewModel) {
             }
         }
 
+        // PID Selection Card
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Select PIDs to Record", style = MaterialTheme.typography.titleSmall)
+                    
+                    if (vm.supportedPids.isNotEmpty() && !vm.isRecording) {
+                        TextButton(onClick = {
+                            val allWithNames = vm.supportedPids.filter { vm.pidNames.containsKey(it) }
+                            if (vm.selectedPidsToRecord.size == allWithNames.size) {
+                                vm.selectedPidsToRecord.clear()
+                            } else {
+                                vm.selectedPidsToRecord.clear()
+                                vm.selectedPidsToRecord.addAll(allWithNames)
+                            }
+                        }) {
+                            val allWithNames = vm.supportedPids.filter { vm.pidNames.containsKey(it) }
+                            Text(if (vm.selectedPidsToRecord.size == allWithNames.size) "Deselect All" else "Select All")
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                
+                if (vm.supportedPids.isEmpty()) {
+                    Text("Connect to car to see available PIDs.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    // Group PIDs by their names
+                    val pidsWithNames = vm.supportedPids.filter { vm.pidNames.containsKey(it) }
+                    
+                    pidsWithNames.forEach { pid ->
+                        val name = vm.pidNames[pid] ?: pid
+                        val isSelected = vm.selectedPidsToRecord.contains(pid)
+                        
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { checked ->
+                                    if (checked) vm.selectedPidsToRecord.add(pid)
+                                    else vm.selectedPidsToRecord.remove(pid)
+                                },
+                                enabled = !vm.isRecording
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(name, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+        }
+
         Text("Saved Recordings", style = MaterialTheme.typography.titleMedium)
 
         if (sessions.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No recordings found.", style = MaterialTheme.typography.bodyMedium)
-            }
+            Text("No recordings found.", style = MaterialTheme.typography.bodyMedium)
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(sessions) { session ->
-                    SessionItem(
-                        session = session,
-                        onShare = { vm.shareSession(session) },
-                        onDelete = { vm.deleteSession(session) }
-                    )
-                }
+            // Since parent is scrollable, we shouldn't use LazyColumn here directly with fillMaxSize
+            // instead we can just map the sessions to SessionItems
+            sessions.forEach { session ->
+                SessionItem(
+                    session = session,
+                    onShare = { vm.shareSession(session) },
+                    onDelete = { vm.deleteSession(session) }
+                )
             }
         }
     }

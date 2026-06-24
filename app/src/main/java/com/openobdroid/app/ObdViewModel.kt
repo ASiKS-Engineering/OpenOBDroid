@@ -54,7 +54,7 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
             .map { "Read ${pidNames[it]}" }
     }
 
-    private val pidNames = mapOf(
+    val pidNames = mapOf(
         "0C" to "Engine RPM",
         "0D" to "Vehicle Speed",
         "05" to "Coolant Temp",
@@ -88,6 +88,8 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
 
     // Recording state
     var isRecording by mutableStateOf(false)
+    var selectedPidsToRecord = mutableStateListOf<String>()
+    var actualRecordingIntervalMs by mutableIntStateOf(0)
     private var currentSessionId: Long? = null
     private var recordingJob: Job? = null
     val sessions = recordingDao.getAllSessions()
@@ -99,7 +101,7 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
         
         viewModelScope.launch(Dispatchers.IO) {
             val startTime = System.currentTimeMillis()
-            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+            val sdf = SimpleDateFormat("yyyy-MM-dd HH-mm-ss", Locale.getDefault())
             val name = "Log ${sdf.format(Date(startTime))}"
             
             // Read DTCs at start
@@ -113,26 +115,31 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
             
             recordingJob = launch {
                 while (isActive && isRecording) {
+                    val loopStart = System.currentTimeMillis()
                     val sessionId = currentSessionId ?: break
                     val dataPoints = mutableListOf<SensorDataPoint>()
-                    val timestamp = System.currentTimeMillis()
+                    val timestamp = loopStart
                     
-                    // Poll all supported sensors that we have names for
-                    for (pid in supportedPids) {
-                        if (pidNames.containsKey(pid)) {
-                            val response = elm?.runCommandDirect("01$pid")
-                            val value = LiveDataParser.parse(response ?: "", "01$pid")
-                            if (value != null) {
-                                dataPoints.add(
-                                    SensorDataPoint(
-                                        sessionId = sessionId,
-                                        timestamp = timestamp,
-                                        pid = pid,
-                                        name = pidNames[pid] ?: pid,
-                                        value = value
-                                    )
+                    // Use a local copy to avoid ConcurrentModificationException if user changes selection
+                    val pidsToPoll = selectedPidsToRecord.toList().ifEmpty { 
+                        // If nothing selected, poll all supported by default
+                        supportedPids.filter { pidNames.containsKey(it) } 
+                    }
+
+                    for (pid in pidsToPoll) {
+                        if (!isRecording) break
+                        val response = elm?.runCommandDirect("01$pid")
+                        val value = LiveDataParser.parse(response ?: "", "01$pid")
+                        if (value != null) {
+                            dataPoints.add(
+                                SensorDataPoint(
+                                    sessionId = sessionId,
+                                    timestamp = timestamp,
+                                    pid = pid,
+                                    name = pidNames[pid] ?: pid,
+                                    value = value
                                 )
-                            }
+                            )
                         }
                     }
                     
@@ -140,7 +147,13 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
                         recordingDao.insertDataPoints(dataPoints)
                     }
                     
-                    delay(settings.recordingIntervalMs.toLong())
+                    val timeTaken = (System.currentTimeMillis() - loopStart).toInt()
+                    actualRecordingIntervalMs = timeTaken
+                    
+                    val targetInterval = settings.recordingIntervalMs
+                    // Adaptive sleep: if we took longer than target, don't wait (just a tiny buffer)
+                    val sleepTime = (targetInterval - timeTaken).toLong().coerceAtLeast(0)
+                    delay(sleepTime)
                 }
             }
         }
@@ -182,7 +195,8 @@ class ObdViewModel(application: Application) : AndroidViewModel(application) {
             val data = recordingDao.getDataForSession(session.id)
             if (data.isEmpty()) return@launch
 
-            val csvFile = File(getApplication<Application>().cacheDir, "${session.name.replace(" ", "_")}.csv")
+            val sanitizedName = session.name.replace(" ", "_").replace(":", "-")
+            val csvFile = File(getApplication<Application>().cacheDir, "$sanitizedName.csv")
             try {
                 FileWriter(csvFile).use { writer ->
                     if (session.dtcsAtStart != null) writer.write("# DTCs at start: ${session.dtcsAtStart}\n")
